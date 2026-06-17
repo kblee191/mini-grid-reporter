@@ -31,7 +31,7 @@ with col4:
 st.header("2. Upload Log Files")
 uploaded_files = st.file_uploader(
     f"Select CSV Log Files for {grid_name}", 
-    type=["csv"], 
+    type=["csv", "CSV"], 
     accept_multiple_files=True
 )
 
@@ -129,6 +129,7 @@ if uploaded_files and st.button("Generate Report", type="primary"):
         # C. Daily Battery SOC Analysis
         if 'BSP-SOC [%] 1' in df_data.columns:
             daily_min_soc = df_data['BSP-SOC [%] 1'].resample('D').min()
+            daily_max_soc = df_data['BSP-SOC [%] 1'].resample('D').max() # Added Max SOC
             
             min_soc_timestamp = df_data['BSP-SOC [%] 1'].resample('D').apply(
                 lambda x: x.idxmin() if x.notna().any() else pd.NaT
@@ -139,6 +140,7 @@ if uploaded_files and st.button("Generate Report", type="primary"):
             soc_6pm = df_data['BSP-SOC [%] 1'].between_time('17:55', '18:05').resample('D').mean()
         else:
             daily_min_soc = pd.Series(dtype=float)
+            daily_max_soc = pd.Series(dtype=float)
             daily_min_soc_time = pd.Series(dtype=str)
             soc_6am = pd.Series(dtype=float)
             soc_6pm = pd.Series(dtype=float)
@@ -150,6 +152,7 @@ if uploaded_files and st.button("Generate Report", type="primary"):
             'System_Online_Hours': daily_online_hours.round(2) if not daily_online_hours.empty else None,
             'SOC_6AM_%': soc_6am.round(1) if not soc_6am.empty else None,
             'SOC_6PM_%': soc_6pm.round(1) if not soc_6pm.empty else None,
+            'Max_SOC_%': daily_max_soc, # Added Max SOC
             'Min_SOC_%': daily_min_soc,
             'Time_of_Min_SOC': daily_min_soc_time
         })
@@ -196,42 +199,30 @@ if uploaded_files and st.button("Generate Report", type="primary"):
         st.info(f"**Target Solar Generation:** {target_generation:,.2f} kWh")
 
         # ==========================================
-        # --- Visualizations ---
+        # --- High-Resolution Visualizations ---
         # ==========================================
         st.divider()
         st.subheader("📈 High-Resolution Performance Visualizations")
         
-        # We rename the tabs to reflect the high-resolution data
         tab1, tab2, tab3 = st.tabs(["⚡ Power Profile (kW)", "🔋 Battery SOC (%)", "⏱️ Daily Online Hours"])
         
         with tab1:
             st.markdown("**Minute-by-Minute Solar Power vs. AC Output**")
-            
-            # Extract the raw minute-by-minute columns from df_data
             power_df = df_data[['Solar power (ALL) [kW] ALL', 'Total_AC_Output_kW']].copy()
-            power_df.columns = ['Solar Power (kW)', 'AC Output (kW)'] # Clean names for the chart
-            
-            # Plotly Line Chart for highly detailed time-series
+            power_df.columns = ['Solar Power (kW)', 'AC Output (kW)'] 
             fig_power = px.line(
-                power_df, 
-                y=['Solar Power (kW)', 'AC Output (kW)'],
+                power_df, y=['Solar Power (kW)', 'AC Output (kW)'],
                 labels={'value': 'Power (kW)', 'Time': 'Date & Time', 'variable': 'Metric'},
-                title="Continuous System Power Profile"
             )
-            # Add a unified hover box so you can see both values at the exact same minute
             fig_power.update_layout(legend_title_text='', hovermode="x unified")
-            
             st.plotly_chart(fig_power, use_container_width=True)
             
         with tab2:
             st.markdown("**Continuous State of Charge (SOC) Profile**")
-            
             if 'BSP-SOC [%] 1' in df_data.columns:
                 fig_soc = px.line(
-                    df_data, 
-                    y='BSP-SOC [%] 1',
-                    labels={'BSP-SOC [%] 1': 'Battery SOC (%)', 'Time': 'Date & Time'},
-                    title="Minute-by-Minute Battery SOC"
+                    df_data, y='BSP-SOC [%] 1',
+                    labels={'BSP-SOC [%] 1': 'Battery SOC (%)', 'Time': 'Date & Time'}
                 )
                 fig_soc.update_layout(hovermode="x unified")
                 st.plotly_chart(fig_soc, use_container_width=True)
@@ -240,8 +231,32 @@ if uploaded_files and st.button("Generate Report", type="primary"):
             
         with tab3:
             st.markdown("**System Online Hours per Day**")
-            # Online hours remains a daily aggregated metric, so we keep using report_df here
             st.area_chart(report_df['System_Online_Hours'])
             
         st.divider()
+
         # ==========================================
+        # --- Display Daily Summary Table ---
+        # ==========================================
+        st.subheader("Daily Performance Summary Table")
+        st.dataframe(report_df, use_container_width=True)
+
+        # --- Download Button ---
+        clean_grid_name = "".join(x for x in grid_name if x.isalnum() or x in " -_")
+        output_filename = f'{clean_grid_name}_{review_period.replace(" ", "_")}_Report.csv'
+        
+        csv_data = report_df.to_csv().encode('utf-8')
+        st.download_button(
+            label="⬇️ Download Daily Report (CSV)",
+            data=csv_data,
+            file_name=output_filename,
+            mime='text/csv',
+        )
+
+        # --- Display Events ---
+        if not df_events.empty:
+            st.divider()
+            st.subheader("Top System Events / Faults")
+            top_events = df_events['Message'].value_counts().head(5).reset_index()
+            top_events.columns = ['Event Message', 'Count']
+            st.dataframe(top_events, hide_index=True)
