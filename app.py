@@ -115,21 +115,25 @@ if uploaded_files and st.button("Generate Report", type="primary"):
         else:
             daily_solar_kwh = pd.Series(dtype=float)
 
-        # B. Total AC Energy Output (kWh) & Online Hours
+        # B. Total AC Energy Output (kWh), Online Hours, and Peak Power
         pout_cols = [c for c in df_data.columns if c.startswith('XT-Pout a [kW]')]
 
         if pout_cols:
             df_data['Total_AC_Output_kW'] = df_data[pout_cols].sum(axis=1, skipna=True)
             daily_ac_output_kwh = df_data['Total_AC_Output_kW'].resample('D').sum() / 60
             daily_online_hours = (df_data['Total_AC_Output_kW'] > 0).resample('D').sum() / 60
+            
+            # --- NEW: Find the absolute highest peak power (kW) recorded for the month ---
+            peak_ac_power_kw = df_data['Total_AC_Output_kW'].max() 
         else:
             daily_ac_output_kwh = pd.Series(dtype=float)
             daily_online_hours = pd.Series(dtype=float)
+            peak_ac_power_kw = 0.0
 
         # C. Daily Battery SOC Analysis
         if 'BSP-SOC [%] 1' in df_data.columns:
             daily_min_soc = df_data['BSP-SOC [%] 1'].resample('D').min()
-            daily_max_soc = df_data['BSP-SOC [%] 1'].resample('D').max() # Added Max SOC
+            daily_max_soc = df_data['BSP-SOC [%] 1'].resample('D').max() # Max SOC added
             
             min_soc_timestamp = df_data['BSP-SOC [%] 1'].resample('D').apply(
                 lambda x: x.idxmin() if x.notna().any() else pd.NaT
@@ -152,7 +156,7 @@ if uploaded_files and st.button("Generate Report", type="primary"):
             'System_Online_Hours': daily_online_hours.round(2) if not daily_online_hours.empty else None,
             'SOC_6AM_%': soc_6am.round(1) if not soc_6am.empty else None,
             'SOC_6PM_%': soc_6pm.round(1) if not soc_6pm.empty else None,
-            'Max_SOC_%': daily_max_soc, # Added Max SOC
+            'Max_SOC_%': daily_max_soc, 
             'Min_SOC_%': daily_min_soc,
             'Time_of_Min_SOC': daily_min_soc_time
         })
@@ -182,11 +186,12 @@ if uploaded_files and st.button("Generate Report", type="primary"):
 
         # --- Display Metrics ---
         st.subheader("Monthly Totals")
-        m1, m2, m3, m4 = st.columns(4)
+        m1, m2, m3, m4, m5 = st.columns(5) # --- EXPANDED TO 5 COLUMNS ---
         m1.metric("Total Solar Yield", f"{total_solar:,.2f} kWh")
         m2.metric("Total AC Energy Output", f"{total_ac:,.2f} kWh")
         m3.metric("System Online Time", f"{total_hours:,.2f} hrs")
-        m4.metric("Average SOC (6 AM / 6 PM)", f"{avg_soc_6am:.1f}% / {avg_soc_6pm:.1f}%")
+        m4.metric("Avg SOC (6 AM / 6 PM)", f"{avg_soc_6am:.1f}% / {avg_soc_6pm:.1f}%")
+        m5.metric("Peak AC Power", f"{peak_ac_power_kw:,.2f} kW") # --- NEW METRIC DISPLAY ---
 
         st.divider()
 
