@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import re
 import calendar
+import plotly.express as px
 
 # Page Configuration
 st.set_page_config(page_title="Mini-Grid Reporter", layout="wide", page_icon="⚡")
