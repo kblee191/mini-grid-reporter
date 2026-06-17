@@ -194,6 +194,28 @@ if uploaded_files and st.button("Generate Report", type="primary"):
         k4.metric("Availability Factor", f"{availability_factor:.2f}%")
         st.info(f"**Target Solar Generation:** {target_generation:,.2f} kWh")
 
+# --- Visualizations ---
+        st.divider()
+        st.subheader("📈 Performance Visualizations")
+        
+        # Create tabs for different charts to keep the UI clean
+        tab1, tab2, tab3 = st.tabs(["⚡ Energy Overview", "🔋 Battery SOC Trends", "⏱️ Online Hours"])
+        
+        with tab1:
+            st.markdown("**Daily Solar Yield vs. AC Energy Output (kWh)**")
+            # Streamlit natively plots the DataFrame columns we pass to it
+            st.bar_chart(report_df[['Solar_Yield_kWh', 'AC_Energy_Output_kWh']])
+            
+        with tab2:
+            st.markdown("**Daily State of Charge (SOC) Profile (%)**")
+            st.line_chart(report_df[['SOC_6AM_%', 'SOC_6PM_%', 'Min_SOC_%']])
+            
+        with tab3:
+            st.markdown("**System Online Hours per Day**")
+            st.area_chart(report_df['System_Online_Hours'])
+            
+        st.divider()
+        
         # --- Display Daily Summary Table ---
         st.subheader("Daily Performance Summary")
         st.dataframe(report_df, use_container_width=True)
