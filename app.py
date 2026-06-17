@@ -195,48 +195,53 @@ if uploaded_files and st.button("Generate Report", type="primary"):
         k4.metric("Availability Factor", f"{availability_factor:.2f}%")
         st.info(f"**Target Solar Generation:** {target_generation:,.2f} kWh")
 
-# --- Visualizations ---
+        # ==========================================
+        # --- Visualizations ---
+        # ==========================================
         st.divider()
-        st.subheader("📈 Performance Visualizations")
+        st.subheader("📈 High-Resolution Performance Visualizations")
         
-        # Create tabs for different charts to keep the UI clean
-        tab1, tab2, tab3 = st.tabs(["⚡ Energy Overview", "🔋 Battery SOC Trends", "⏱️ Online Hours"])
+        # We rename the tabs to reflect the high-resolution data
+        tab1, tab2, tab3 = st.tabs(["⚡ Power Profile (kW)", "🔋 Battery SOC (%)", "⏱️ Daily Online Hours"])
         
         with tab1:
-            st.markdown("**Daily Solar Yield vs. AC Energy Output (kWh)**")
-            # Streamlit natively plots the DataFrame columns we pass to it
-            st.bar_chart(report_df[['Solar_Yield_kWh', 'AC_Energy_Output_kWh']])
+            st.markdown("**Minute-by-Minute Solar Power vs. AC Output**")
+            
+            # Extract the raw minute-by-minute columns from df_data
+            power_df = df_data[['Solar power (ALL) [kW] ALL', 'Total_AC_Output_kW']].copy()
+            power_df.columns = ['Solar Power (kW)', 'AC Output (kW)'] # Clean names for the chart
+            
+            # Plotly Line Chart for highly detailed time-series
+            fig_power = px.line(
+                power_df, 
+                y=['Solar Power (kW)', 'AC Output (kW)'],
+                labels={'value': 'Power (kW)', 'Time': 'Date & Time', 'variable': 'Metric'},
+                title="Continuous System Power Profile"
+            )
+            # Add a unified hover box so you can see both values at the exact same minute
+            fig_power.update_layout(legend_title_text='', hovermode="x unified")
+            
+            st.plotly_chart(fig_power, use_container_width=True)
             
         with tab2:
-            st.markdown("**Daily State of Charge (SOC) Profile (%)**")
-            st.line_chart(report_df[['SOC_6AM_%', 'SOC_6PM_%', 'Min_SOC_%']])
+            st.markdown("**Continuous State of Charge (SOC) Profile**")
+            
+            if 'BSP-SOC [%] 1' in df_data.columns:
+                fig_soc = px.line(
+                    df_data, 
+                    y='BSP-SOC [%] 1',
+                    labels={'BSP-SOC [%] 1': 'Battery SOC (%)', 'Time': 'Date & Time'},
+                    title="Minute-by-Minute Battery SOC"
+                )
+                fig_soc.update_layout(hovermode="x unified")
+                st.plotly_chart(fig_soc, use_container_width=True)
+            else:
+                st.warning("SOC data not available in these logs.")
             
         with tab3:
             st.markdown("**System Online Hours per Day**")
+            # Online hours remains a daily aggregated metric, so we keep using report_df here
             st.area_chart(report_df['System_Online_Hours'])
             
         st.divider()
-        
-        # --- Display Daily Summary Table ---
-        st.subheader("Daily Performance Summary")
-        st.dataframe(report_df, use_container_width=True)
-
-        # --- Download Button ---
-        clean_grid_name = "".join(x for x in grid_name if x.isalnum() or x in " -_")
-        output_filename = f'{clean_grid_name}_{review_period.replace(" ", "_")}_Report.csv'
-        
-        csv_data = report_df.to_csv().encode('utf-8')
-        st.download_button(
-            label="⬇️ Download Daily Report (CSV)",
-            data=csv_data,
-            file_name=output_filename,
-            mime='text/csv',
-        )
-
-        # --- Display Events ---
-        if not df_events.empty:
-            st.divider()
-            st.subheader("Top System Events / Faults")
-            top_events = df_events['Message'].value_counts().head(5).reset_index()
-            top_events.columns = ['Event Message', 'Count']
-            st.dataframe(top_events, hide_index=True)
+        # ==========================================
