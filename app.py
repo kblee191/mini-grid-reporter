@@ -48,10 +48,10 @@ if not st.session_state["authenticated"]:
     st.stop() # Crucial: Stops the rest of the application from running below
 
 # =========================================================
-# 🔓 Authorized Session Area (Your Existing App)
+# 🔓 Authorized Session Area
 # =========================================================
 
-# Optional: Add a subtle sidebar greeting and a Logout button
+# Sidebar layout for user info and log out
 with st.sidebar:
     st.markdown(f"👤 **User:** `{st.session_state['user']}`")
     if st.button("Logout", type="secondary", use_container_width=True):
@@ -60,17 +60,11 @@ with st.sidebar:
         st.rerun()
     st.divider()
 
-# --- Your exact app logic continues seamlessly here ---
+# Main Application Headers (Only once!)
 st.title("⚡ Mini-Grid Monthly Performance Reporter")
 st.markdown("Upload your CSV log files to automatically generate a monthly performance report.")
 
-if "uploader_key" not in st.session_state:
-    st.session_state["uploader_key"] = 0
-
-st.title("⚡ Mini-Grid Monthly Performance Reporter")
-st.markdown("Upload your CSV log files to automatically generate a monthly performance report.")
-
-# Initialize session state for the file uploader reset trick
+# Initialize session state key for the file clearing trick
 if "uploader_key" not in st.session_state:
     st.session_state["uploader_key"] = 0
 
@@ -108,7 +102,6 @@ if uploaded_files:
     with btn_col1:
         generate_report = st.button("🚀 Generate Report", type="primary", use_container_width=True)
     with btn_col2:
-        # One-click clear that doesn't wipe out the Configuration inputs above
         if st.button("❌ Clear Files", type="secondary", use_container_width=True):
             st.session_state["uploader_key"] += 1
             st.rerun()
