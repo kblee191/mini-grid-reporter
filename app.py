@@ -10,6 +10,10 @@ st.set_page_config(page_title="Mini-Grid Reporter", layout="wide", page_icon="�
 st.title("⚡ Mini-Grid Monthly Performance Reporter")
 st.markdown("Upload your CSV log files to automatically generate a monthly performance report.")
 
+# Initialize session state for the file uploader reset trick
+if "uploader_key" not in st.session_state:
+    st.session_state["uploader_key"] = 0
+
 # =========================================================
 # 0. User Input for Mini-Grid Parameters
 # =========================================================
@@ -26,23 +30,41 @@ with col4:
     derate_factor = st.number_input("Derate Factor (e.g., 0.75)", min_value=0.01, max_value=1.0, value=0.75, step=0.05)
 
 # =========================================================
-# 1. File Uploading
+# 1. File Uploading & Action Buttons
 # =========================================================
 st.header("2. Upload Log Files")
+
+# File uploader with dynamic key for easy resetting
 uploaded_files = st.file_uploader(
     f"Select CSV Log Files for {grid_name}", 
     type=["csv", "CSV"], 
-    accept_multiple_files=True
+    accept_multiple_files=True,
+    key=f"file_uploader_{st.session_state['uploader_key']}"
 )
 
-if uploaded_files and st.button("Generate Report", type="primary"):
+# Dynamic layout for Action Buttons
+if uploaded_files:
+    btn_col1, btn_col2, _ = st.columns([1.5, 1, 6])
+    with btn_col1:
+        generate_report = st.button("🚀 Generate Report", type="primary", use_container_width=True)
+    with btn_col2:
+        # One-click clear that doesn't wipe out the Configuration inputs above
+        if st.button("❌ Clear Files", type="secondary", use_container_width=True):
+            st.session_state["uploader_key"] += 1
+            st.rerun()
+else:
+    generate_report = False
+
+# =========================================================
+# 2. Report Generation Logic
+# =========================================================
+if uploaded_files and generate_report:
     with st.spinner("Processing files..."):
         data_records = []
         event_records = []
 
-        # 2. Process each selected file
+        # Process each selected file
         for file in uploaded_files:
-            # Read and decode the file content
             content = file.read().decode('latin1')
             lines = content.splitlines()
             
@@ -122,8 +144,6 @@ if uploaded_files and st.button("Generate Report", type="primary"):
             df_data['Total_AC_Output_kW'] = df_data[pout_cols].sum(axis=1, skipna=True)
             daily_ac_output_kwh = df_data['Total_AC_Output_kW'].resample('D').sum() / 60
             daily_online_hours = (df_data['Total_AC_Output_kW'] > 0).resample('D').sum() / 60
-            
-            # --- NEW: Find the absolute highest peak power (kW) recorded for the month ---
             peak_ac_power_kw = df_data['Total_AC_Output_kW'].max() 
         else:
             daily_ac_output_kwh = pd.Series(dtype=float)
@@ -133,7 +153,7 @@ if uploaded_files and st.button("Generate Report", type="primary"):
         # C. Daily Battery SOC Analysis
         if 'BSP-SOC [%] 1' in df_data.columns:
             daily_min_soc = df_data['BSP-SOC [%] 1'].resample('D').min()
-            daily_max_soc = df_data['BSP-SOC [%] 1'].resample('D').max() # Max SOC added
+            daily_max_soc = df_data['BSP-SOC [%] 1'].resample('D').max()
             
             min_soc_timestamp = df_data['BSP-SOC [%] 1'].resample('D').apply(
                 lambda x: x.idxmin() if x.notna().any() else pd.NaT
@@ -186,12 +206,12 @@ if uploaded_files and st.button("Generate Report", type="primary"):
 
         # --- Display Metrics ---
         st.subheader("Monthly Totals")
-        m1, m2, m3, m4, m5 = st.columns(5) # --- EXPANDED TO 5 COLUMNS ---
+        m1, m2, m3, m4, m5 = st.columns(5)
         m1.metric("Total Solar Yield", f"{total_solar:,.2f} kWh")
         m2.metric("Total AC Energy Output", f"{total_ac:,.2f} kWh")
         m3.metric("System Online Time", f"{total_hours:,.2f} hrs")
         m4.metric("Avg SOC (6 AM / 6 PM)", f"{avg_soc_6am:.1f}% / {avg_soc_6pm:.1f}%")
-        m5.metric("Peak AC Power", f"{peak_ac_power_kw:,.2f} kW") # --- NEW METRIC DISPLAY ---
+        m5.metric("Peak AC Power", f"{peak_ac_power_kw:,.2f} kW")
 
         st.divider()
 
