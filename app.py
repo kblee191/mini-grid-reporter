@@ -221,11 +221,11 @@ if uploaded_files and generate_report:
             anomaly_found = False
             
             # 1. Lithium Deep Discharge Check (< 20%)
-            critical_soc_days = report_df[report_df['Min_SOC_%'] < 20.0]
+            critical_soc_days = report_df[report_df['Min_SOC_%'] < 15.0]
             if not critical_soc_days.empty:
                 anomaly_found = True
                 dates_str = ", ".join(critical_soc_days.index.strftime('%b %d'))
-                st.error(f"**Critical Deep Discharge Deteted (< 20%):** Happened on **{dates_str}**. "
+                st.error(f"**Critical Deep Discharge Deteted (< 15%):** Happened on **{dates_str}**. "
                          f"The Lithium-ion bank hit a minimum low of {critical_soc_days['Min_SOC_%'].min():.1f}%. "
                          f"Possible load overload or undersized array.")
             
