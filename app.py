@@ -7,6 +7,66 @@ import plotly.express as px
 # Page Configuration
 st.set_page_config(page_title="Mini-Grid Reporter", layout="wide", page_icon="⚡")
 
+# =========================================================
+# 🔒 Authentication System
+# =========================================================
+if "authenticated" not in st.session_state:
+    st.session_state["authenticated"] = False
+
+def check_credentials(username, password):
+    # Pulls securely from .streamlit/secrets.toml or deployment environment variables
+    try:
+        user_passwords = st.secrets["passwords"]
+        return username in user_passwords and user_passwords[username] == password
+    except KeyError:
+        # Fallback credentials for testing if secrets file doesn't exist yet
+        fallback_creds = {"admin": "password123", "team": "grid2026"}
+        return username in fallback_creds and fallback_creds[username] == password
+
+# Show login screen if not authenticated
+if not st.session_state["authenticated"]:
+    st.markdown("<h2 style='text-align: center;'>⚡ Mini-Grid Reporter Portal</h2>", unsafe_allow_html=True)
+    
+    # Create a centered login box
+    _, login_col, _ = st.columns([1, 1, 1])
+    with login_col:
+        with st.form("login_form"):
+            st.subheader("Team Authorization Required")
+            username = st.text_input("Username").strip()
+            password = st.text_input("Password", type="password")
+            submit = st.form_submit_button("Log In", type="primary", use_container_width=True)
+            
+            if submit:
+                if check_credentials(username, password):
+                    st.session_state["authenticated"] = True
+                    st.session_state["user"] = username
+                    st.success("Access Granted!")
+                    st.rerun()
+                else:
+                    st.error("Invalid username or password.")
+                    
+    st.stop() # Crucial: Stops the rest of the application from running below
+
+# =========================================================
+# 🔓 Authorized Session Area (Your Existing App)
+# =========================================================
+
+# Optional: Add a subtle sidebar greeting and a Logout button
+with st.sidebar:
+    st.markdown(f"👤 **User:** `{st.session_state['user']}`")
+    if st.button("Logout", type="secondary", use_container_width=True):
+        st.session_state["authenticated"] = False
+        st.session_state["user"] = None
+        st.rerun()
+    st.divider()
+
+# --- Your exact app logic continues seamlessly here ---
+st.title("⚡ Mini-Grid Monthly Performance Reporter")
+st.markdown("Upload your CSV log files to automatically generate a monthly performance report.")
+
+if "uploader_key" not in st.session_state:
+    st.session_state["uploader_key"] = 0
+
 st.title("⚡ Mini-Grid Monthly Performance Reporter")
 st.markdown("Upload your CSV log files to automatically generate a monthly performance report.")
 
