@@ -14,12 +14,10 @@ if "authenticated" not in st.session_state:
     st.session_state["authenticated"] = False
 
 def check_credentials(username, password):
-    # Pulls securely from .streamlit/secrets.toml or deployment environment variables
     try:
         user_passwords = st.secrets["passwords"]
         return username in user_passwords and user_passwords[username] == password
     except KeyError:
-        # Fallback credentials for testing if secrets file doesn't exist yet
         fallback_creds = {"admin": "password123", "team": "grid2026"}
         return username in fallback_creds and fallback_creds[username] == password
 
@@ -27,7 +25,6 @@ def check_credentials(username, password):
 if not st.session_state["authenticated"]:
     st.markdown("<h2 style='text-align: center;'>⚡ Mini-Grid Reporter Portal</h2>", unsafe_allow_html=True)
     
-    # Create a centered login box
     _, login_col, _ = st.columns([1, 1, 1])
     with login_col:
         with st.form("login_form"):
@@ -45,13 +42,11 @@ if not st.session_state["authenticated"]:
                 else:
                     st.error("Invalid username or password.")
                     
-    st.stop() # Crucial: Stops the rest of the application from running below
+    st.stop()
 
 # =========================================================
 # 🔓 Authorized Session Area
 # =========================================================
-
-# Sidebar layout for user info and log out
 with st.sidebar:
     st.markdown(f"👤 **User:** `{st.session_state['user']}`")
     if st.button("Logout", type="secondary", use_container_width=True):
@@ -60,11 +55,9 @@ with st.sidebar:
         st.rerun()
     st.divider()
 
-# Main Application Headers (Only once!)
 st.title("⚡ Mini-Grid Monthly Performance Reporter")
 st.markdown("Upload your CSV log files to automatically generate a monthly performance report.")
 
-# Initialize session state key for the file clearing trick
 if "uploader_key" not in st.session_state:
     st.session_state["uploader_key"] = 0
 
@@ -88,7 +81,6 @@ with col4:
 # =========================================================
 st.header("2. Upload Log Files")
 
-# File uploader with dynamic key for easy resetting
 uploaded_files = st.file_uploader(
     f"Select CSV Log Files for {grid_name}", 
     type=["csv", "CSV"], 
@@ -96,7 +88,6 @@ uploaded_files = st.file_uploader(
     key=f"file_uploader_{st.session_state['uploader_key']}"
 )
 
-# Dynamic layout for Action Buttons
 if uploaded_files:
     btn_col1, btn_col2, _ = st.columns([1.5, 1, 6])
     with btn_col1:
@@ -116,7 +107,6 @@ if uploaded_files and generate_report:
         data_records = []
         event_records = []
 
-        # Process each selected file
         for file in uploaded_files:
             content = file.read().decode('latin1')
             lines = content.splitlines()
@@ -137,7 +127,6 @@ if uploaded_files and generate_report:
                 col_name = f"{last_r0} {phase}".strip()
                 cols.append(col_name)
 
-            # Parse Rows
             for line in lines[3:]:
                 row = [x.strip('"\n\r ') for x in line.split(',')]
                 if not row or not row[0]: continue
@@ -166,31 +155,26 @@ if uploaded_files and generate_report:
             st.error("Error: No valid system data was found in the selected files.")
             st.stop()
 
-        # 3. Create Pandas DataFrames
         df_data = pd.DataFrame(data_records)
         df_data['Time'] = pd.to_datetime(df_data['Time'], format='%d.%m.%Y %H:%M')
         df_data.set_index('Time', inplace=True)
         df_data = df_data.sort_index()
 
         df_events = pd.DataFrame(event_records)
-
-        # Extract Review Month and Year automatically
         review_period = df_data.index[0].strftime('%B %Y')
 
         st.success(f"Successfully processed {len(uploaded_files)} files for {review_period}.")
 
         # =========================================================
-        # 4. Extract Key Operation and Maintenance (O&M) Metrics
+        # 3. Extract Metrics & Setup Summary DataFrame
         # =========================================================
         st.header(f"📊 {grid_name.upper()} REPORT - {review_period.upper()}")
 
-        # A. Daily Solar Generation (kWh) 
         if 'Solar power (ALL) [kW] ALL' in df_data.columns:
             daily_solar_kwh = df_data['Solar power (ALL) [kW] ALL'].resample('D').sum() / 60
         else:
             daily_solar_kwh = pd.Series(dtype=float)
 
-        # B. Total AC Energy Output (kWh), Online Hours, and Peak Power
         pout_cols = [c for c in df_data.columns if c.startswith('XT-Pout a [kW]')]
 
         if pout_cols:
@@ -203,16 +187,11 @@ if uploaded_files and generate_report:
             daily_online_hours = pd.Series(dtype=float)
             peak_ac_power_kw = 0.0
 
-        # C. Daily Battery SOC Analysis
         if 'BSP-SOC [%] 1' in df_data.columns:
             daily_min_soc = df_data['BSP-SOC [%] 1'].resample('D').min()
             daily_max_soc = df_data['BSP-SOC [%] 1'].resample('D').max()
-            
-            min_soc_timestamp = df_data['BSP-SOC [%] 1'].resample('D').apply(
-                lambda x: x.idxmin() if x.notna().any() else pd.NaT
-            )
+            min_soc_timestamp = df_data['BSP-SOC [%] 1'].resample('D').apply(lambda x: x.idxmin() if x.notna().any() else pd.NaT)
             daily_min_soc_time = min_soc_timestamp.dt.strftime('%H:%M')
-            
             soc_6am = df_data['BSP-SOC [%] 1'].between_time('05:55', '06:05').resample('D').mean()
             soc_6pm = df_data['BSP-SOC [%] 1'].between_time('17:55', '18:05').resample('D').mean()
         else:
@@ -222,7 +201,6 @@ if uploaded_files and generate_report:
             soc_6am = pd.Series(dtype=float)
             soc_6pm = pd.Series(dtype=float)
 
-        # Combine into a final summary table
         report_df = pd.DataFrame({
             'Solar_Yield_kWh': daily_solar_kwh.round(2) if not daily_solar_kwh.empty else None,
             'AC_Energy_Output_kWh': daily_ac_output_kwh.round(2) if not daily_ac_output_kwh.empty else None,
@@ -235,12 +213,61 @@ if uploaded_files and generate_report:
         })
 
         # =========================================================
-        # 5. Monthly Totals & KPI Calculations
+        # 🚨 NEW FEATURE: Field Engineer Automated Diagnostics
+        # =========================================================
+        st.subheader("🚨 Field Engineer Automated Diagnostics")
+        
+        with st.expander("🛠️ View Detected System Anomalies & Warnings", expanded=True):
+            anomaly_found = False
+            
+            # 1. Lithium Deep Discharge Check (< 20%)
+            critical_soc_days = report_df[report_df['Min_SOC_%'] < 20.0]
+            if not critical_soc_days.empty:
+                anomaly_found = True
+                dates_str = ", ".join(critical_soc_days.index.strftime('%b %d'))
+                st.error(f"**Critical Deep Discharge Deteted (< 20%):** Happened on **{dates_str}**. "
+                         f"The Lithium-ion bank hit a minimum low of {critical_soc_days['Min_SOC_%'].min():.1f}%. "
+                         f"Possible load overload or undersized array.")
+            
+            # 2. Deficit Daytime Recharge Check (Max SOC < 85% during the day)
+            poor_recharge_days = report_df[report_df['Max_SOC_%'] < 85.0]
+            if not poor_recharge_days.empty:
+                anomaly_found = True
+                dates_str = ", ".join(poor_recharge_days.index.strftime('%b %d'))
+                st.warning(f"**Incomplete Daytime Recharge (< 85%):** Batteries failed to fully charge on **{dates_str}**. "
+                           f"Check if panels are heavily soiled/shaded or daytime load was abnormally high.")
+
+            # 3. Peak Midday Solar Dropped to Zero (Inverter/Breaker Trip Check)
+            if 'Solar power (ALL) [kW] ALL' in df_data.columns:
+                midday_solar = df_data.between_time('11:00', '13:00')
+                daily_midday_avg = midday_solar['Solar power (ALL) [kW] ALL'].resample('D').mean()
+                zero_solar_days = daily_midday_avg[daily_midday_avg < 0.1] # effectively 0 kW during peak sun
+                
+                if not zero_solar_days.empty:
+                    anomaly_found = True
+                    dates_str = ", ".join(zero_solar_days.index.strftime('%b %d'))
+                    st.error(f"**Zero Midday Solar Output Trip:** Solar generation completely cut out between 11 AM - 1 PM on **{dates_str}**. "
+                             f"This indicates a severe local hardware event (e.g., Tripped DC breaker, blown string fuses, or inverter error).")
+
+            # 4. System Outage / Micro-blackout Check (Online Hours < 23.5 hours)
+            outage_days = report_df[report_df['System_Online_Hours'] < 23.5]
+            if not outage_days.empty:
+                anomaly_found = True
+                for idx, row in outage_days.iterrows():
+                    st.error(f"**System Blackout Event:** Grid went offline on **{idx.strftime('%b %d')}** for approximately "
+                             f"{24.0 - row['System_Online_Hours']:.2f} hours. Cross-reference the fault log below for exact timing.")
+
+            if not anomaly_found:
+                st.success("✅ No operational anomalies detected. Lithium-ion health parameters and PV strings running within target tolerances.")
+
+        st.divider()
+
+        # =========================================================
+        # 4. Monthly Totals & KPI Calculations
         # =========================================================
         total_solar = report_df['Solar_Yield_kWh'].sum()
         total_ac = report_df['AC_Energy_Output_kWh'].sum()
         total_hours = report_df['System_Online_Hours'].sum()
-
         avg_soc_6am = report_df['SOC_6AM_%'].mean()
         avg_soc_6pm = report_df['SOC_6PM_%'].mean()
 
@@ -257,7 +284,6 @@ if uploaded_files and generate_report:
         availability_factor = (total_hours / planned_operational_hours) * 100 if planned_operational_hours > 0 else 0
         target_generation = peak_sun_hours * grid_capacity_kwp * num_days_in_month * derate_factor
 
-        # --- Display Metrics ---
         st.subheader("Monthly Totals")
         m1, m2, m3, m4, m5 = st.columns(5)
         m1.metric("Total Solar Yield", f"{total_solar:,.2f} kWh")
@@ -277,7 +303,7 @@ if uploaded_files and generate_report:
         st.info(f"**Target Solar Generation:** {target_generation:,.2f} kWh")
 
         # ==========================================
-        # --- High-Resolution Visualizations ---
+        # --- Visualizations & Dataframes ---
         # ==========================================
         st.divider()
         st.subheader("📈 High-Resolution Performance Visualizations")
@@ -288,20 +314,14 @@ if uploaded_files and generate_report:
             st.markdown("**Minute-by-Minute Solar Power vs. AC Output**")
             power_df = df_data[['Solar power (ALL) [kW] ALL', 'Total_AC_Output_kW']].copy()
             power_df.columns = ['Solar Power (kW)', 'AC Output (kW)'] 
-            fig_power = px.line(
-                power_df, y=['Solar Power (kW)', 'AC Output (kW)'],
-                labels={'value': 'Power (kW)', 'Time': 'Date & Time', 'variable': 'Metric'},
-            )
+            fig_power = px.line(power_df, y=['Solar Power (kW)', 'AC Output (kW)'], labels={'value': 'Power (kW)', 'Time': 'Date & Time'})
             fig_power.update_layout(legend_title_text='', hovermode="x unified")
             st.plotly_chart(fig_power, use_container_width=True)
             
         with tab2:
             st.markdown("**Continuous State of Charge (SOC) Profile**")
             if 'BSP-SOC [%] 1' in df_data.columns:
-                fig_soc = px.line(
-                    df_data, y='BSP-SOC [%] 1',
-                    labels={'BSP-SOC [%] 1': 'Battery SOC (%)', 'Time': 'Date & Time'}
-                )
+                fig_soc = px.line(df_data, y='BSP-SOC [%] 1', labels={'BSP-SOC [%] 1': 'Battery SOC (%)'})
                 fig_soc.update_layout(hovermode="x unified")
                 st.plotly_chart(fig_soc, use_container_width=True)
             else:
@@ -313,25 +333,14 @@ if uploaded_files and generate_report:
             
         st.divider()
 
-        # ==========================================
-        # --- Display Daily Summary Table ---
-        # ==========================================
         st.subheader("Daily Performance Summary Table")
         st.dataframe(report_df, use_container_width=True)
 
-        # --- Download Button ---
         clean_grid_name = "".join(x for x in grid_name if x.isalnum() or x in " -_")
         output_filename = f'{clean_grid_name}_{review_period.replace(" ", "_")}_Report.csv'
-        
         csv_data = report_df.to_csv().encode('utf-8')
-        st.download_button(
-            label="⬇️ Download Daily Report (CSV)",
-            data=csv_data,
-            file_name=output_filename,
-            mime='text/csv',
-        )
+        st.download_button(label="⬇️ Download Daily Report (CSV)", data=csv_data, file_name=output_filename, mime='text/csv')
 
-        # --- Display Events ---
         if not df_events.empty:
             st.divider()
             st.subheader("Top System Events / Faults")
