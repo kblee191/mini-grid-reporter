@@ -1,3 +1,5 @@
 streamlit
 pandas
 plotly
+st-postgresql
+psycopg2-binary  
