@@ -215,7 +215,7 @@ if uploaded_files and generate_report:
         # =========================================================
         # 🚨 NEW FEATURE: Field Engineer Automated Diagnostics
         # =========================================================
-        st.subheader("🚨 Field Engineer Automated Diagnostics")
+        st.subheader("🚨 System Anomaly Detection")
         
         with st.expander("🛠️ View Detected System Anomalies & Warnings", expanded=True):
             anomaly_found = False
