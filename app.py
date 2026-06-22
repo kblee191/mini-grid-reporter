@@ -3,6 +3,7 @@ import pandas as pd
 import re
 import calendar
 import plotly.express as px
+from sqlalchemy import text
 
 # Connect to our cloud database automatically using secrets config
 conn = st.connection("postgresql", type="sql")
@@ -370,7 +371,7 @@ if app_mode == "Upload New CSV Logs":
                 with st.spinner("Archiving data rows directly to Supabase..."):
                     try:
                         with conn.session as session:
-                            session.execute("""
+                            session.execute(text("""
                                 CREATE TABLE IF NOT EXISTS minigrid_daily_reports (
                                     id SERIAL PRIMARY KEY,
                                     grid_name VARCHAR(100) NOT NULL,
@@ -385,11 +386,11 @@ if app_mode == "Upload New CSV Logs":
                                     time_of_min_soc VARCHAR(10),
                                     UNIQUE(grid_name, report_date)
                                 );
-                            """)
+                            """))
                             
                             for idx, row in report_df.iterrows():
                                 session.execute(
-                                    """
+                                    text("""
                                     INSERT INTO minigrid_daily_reports 
                                     (grid_name, report_date, solar_yield_kwh, ac_energy_output_kwh, system_online_hours, soc_6am, soc_6pm, max_soc, min_soc, time_of_min_soc)
                                     VALUES (:grid_name, :report_date, :solar, :ac, :online, :soc6am, :soc6pm, :max_soc, :min_soc, :time_min)
@@ -403,7 +404,7 @@ if app_mode == "Upload New CSV Logs":
                                         max_soc = EXCLUDED.max_soc,
                                         min_soc = EXCLUDED.min_soc,
                                         time_of_min_soc = EXCLUDED.time_of_min_soc;
-                                    """,
+                                    """),
                                     {
                                         "grid_name": active_grid,
                                         "report_date": idx.date(),
