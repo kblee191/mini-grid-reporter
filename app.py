@@ -10,12 +10,17 @@ conn = st.connection("postgresql", type="sql")
 # Page Configuration
 st.set_page_config(page_title="Mini-Grid Reporter", layout="wide", page_icon="⚡")
 
+# Initialize session state memory keys if they don't exist
+if "authenticated" not in st.session_state:
+    st.session_state["authenticated"] = False
+if "uploader_key" not in st.session_state:
+    st.session_state["uploader_key"] = 0
+if "processed_report" not in st.session_state:
+    st.session_state["processed_report"] = None
+
 # =========================================================
 # 🔒 Authentication System
 # =========================================================
-if "authenticated" not in st.session_state:
-    st.session_state["authenticated"] = False
-
 def check_credentials(username, password):
     try:
         user_passwords = st.secrets["passwords"]
@@ -55,14 +60,12 @@ with st.sidebar:
     if st.button("Logout", type="secondary", use_container_width=True):
         st.session_state["authenticated"] = False
         st.session_state["user"] = None
+        st.session_state["processed_report"] = None
         st.rerun()
     st.divider()
 
 st.title("⚡ Mini-Grid Monthly Performance Reporter")
 st.markdown("Analyze raw system logs and maintain a central historical archive for your mini-grid operations.")
-
-if "uploader_key" not in st.session_state:
-    st.session_state["uploader_key"] = 0
 
 # =========================================================
 # 0. User Input for Mini-Grid Parameters
@@ -94,19 +97,20 @@ if app_mode == "Upload New CSV Logs":
         key=f"file_uploader_{st.session_state['uploader_key']}"
     )
 
+    generate_report = False
     if uploaded_files:
         btn_col1, btn_col2, _ = st.columns([1.5, 1, 6])
         with btn_col1:
-            generate_report = st.button("🚀 Generate Report", type="primary", use_container_width=True)
+            if st.button("🚀 Generate Report", type="primary", use_container_width=True):
+                generate_report = True
         with btn_col2:
             if st.button("❌ Clear Files", type="secondary", use_container_width=True):
                 st.session_state["uploader_key"] += 1
+                st.session_state["processed_report"] = None
                 st.rerun()
-    else:
-        generate_report = False
 
     # =========================================================
-    # 2. Report Generation Logic
+    # 2. Report Generation Logic (Runs only on click)
     # =========================================================
     if uploaded_files and generate_report:
         with st.spinner("Processing files..."):
@@ -169,13 +173,6 @@ if app_mode == "Upload New CSV Logs":
             df_events = pd.DataFrame(event_records)
             review_period = df_data.index[0].strftime('%B %Y')
 
-            st.success(f"Successfully processed {len(uploaded_files)} files for {review_period}.")
-
-            # =========================================================
-            # 3. Extract Metrics & Setup Summary DataFrame
-            # =========================================================
-            st.header(f"📊 {grid_name.upper()} REPORT - {review_period.upper()}")
-
             if 'Solar power (ALL) [kW] ALL' in df_data.columns:
                 daily_solar_kwh = df_data['Solar power (ALL) [kW] ALL'].resample('D').sum() / 60
             else:
@@ -218,217 +215,230 @@ if app_mode == "Upload New CSV Logs":
                 'Time_of_Min_SOC': daily_min_soc_time
             })
 
-            # =========================================================
-            # 🚨 System Anomaly Detection
-            # =========================================================
-            st.subheader("🚨 System Anomaly Detection")
+            # Save compiled datasets to continuous background session memory
+            st.session_state["processed_report"] = {
+                "report_df": report_df,
+                "df_data": df_data,
+                "df_events": df_events,
+                "review_period": review_period,
+                "grid_name": grid_name,
+                "grid_capacity_kwp": grid_capacity_kwp,
+                "peak_sun_hours": peak_sun_hours,
+                "derate_factor": derate_factor,
+                "peak_ac_power_kw": peak_ac_power_kw
+            }
+
+    # =========================================================
+    # 3. Render Dashboard from Memory (Keeps UI locked on screen)
+    # =========================================================
+    if st.session_state["processed_report"] is not None:
+        # Unpack stored variables safely
+        rep = st.session_state["processed_report"]
+        report_df = rep["report_df"]
+        df_data = rep["df_data"]
+        df_events = rep["df_events"]
+        review_period = rep["review_period"]
+        active_grid = rep["grid_name"]
+        capacity = rep["grid_capacity_kwp"]
+        sun_hours = rep["peak_sun_hours"]
+        derate = rep["derate_factor"]
+        peak_ac_power_kw = rep["peak_ac_power_kw"]
+
+        st.success(f"Successfully loaded processing summary for {review_period}.")
+        st.header(f"📊 {active_grid.upper()} REPORT - {review_period.upper()}")
+
+        # =========================================================
+        # 🚨 System Anomaly Detection
+        # =========================================================
+        st.subheader("🚨 System Anomaly Detection")
+        with st.expander("🛠️ View Detected System Anomalies & Warnings", expanded=True):
+            anomaly_found = False
             
-            with st.expander("🛠️ View Detected System Anomalies & Warnings", expanded=True):
-                anomaly_found = False
-                
-                # 1. Lithium Deep Discharge Check (< 20%)
-                critical_soc_days = report_df[report_df['Min_SOC_%'] < 20.0]
-                if not critical_soc_days.empty:
+            critical_soc_days = report_df[report_df['Min_SOC_%'] < 20.0]
+            if not critical_soc_days.empty:
+                anomaly_found = True
+                dates_str = ", ".join(critical_soc_days.index.strftime('%b %d'))
+                st.error(f"**Critical Deep Discharge Detected (< 20%):** Happened on **{dates_str}**. "
+                         f"The Lithium-ion bank hit a minimum low of {critical_soc_days['Min_SOC_%'].min():.1f}%.")
+            
+            poor_recharge_days = report_df[report_df['Max_SOC_%'] < 85.0]
+            if not poor_recharge_days.empty:
+                anomaly_found = True
+                dates_str = ", ".join(poor_recharge_days.index.strftime('%b %d'))
+                st.warning(f"**Incomplete Daytime Recharge (< 85%):** Batteries failed to fully charge on **{dates_str}**.")
+
+            if 'Solar power (ALL) [kW] ALL' in df_data.columns:
+                midday_solar = df_data.between_time('11:00', '13:00')
+                daily_midday_avg = midday_solar['Solar power (ALL) [kW] ALL'].resample('D').mean()
+                zero_solar_days = daily_midday_avg[daily_midday_avg < 0.1]
+                if not zero_solar_days.empty:
                     anomaly_found = True
-                    dates_str = ", ".join(critical_soc_days.index.strftime('%b %d'))
-                    st.error(f"**Critical Deep Discharge Detected (< 20%):** Happened on **{dates_str}**. "
-                             f"The Lithium-ion bank hit a minimum low of {critical_soc_days['Min_SOC_%'].min():.1f}%. "
-                             f"Possible load overload or undersized array.")
-                
-                # 2. Deficit Daytime Recharge Check (Max SOC < 85% during the day)
-                poor_recharge_days = report_df[report_df['Max_SOC_%'] < 85.0]
-                if not poor_recharge_days.empty:
-                    anomaly_found = True
-                    dates_str = ", ".join(poor_recharge_days.index.strftime('%b %d'))
-                    st.warning(f"**Incomplete Daytime Recharge (< 85%):** Batteries failed to fully charge on **{dates_str}**. "
-                               f"Check if panels are heavily soiled/shaded or daytime load was abnormally high.")
+                    dates_str = ", ".join(zero_solar_days.index.strftime('%b %d'))
+                    st.error(f"**Zero Midday Solar Output Trip:** Solar generation cut out between 11 AM - 1 PM on **{dates_str}**.")
 
-                # 3. Peak Midday Solar Dropped to Zero (Inverter/Breaker Trip Check)
-                if 'Solar power (ALL) [kW] ALL' in df_data.columns:
-                    midday_solar = df_data.between_time('11:00', '13:00')
-                    daily_midday_avg = midday_solar['Solar power (ALL) [kW] ALL'].resample('D').mean()
-                    zero_solar_days = daily_midday_avg[daily_midday_avg < 0.1]
-                    
-                    if not zero_solar_days.empty:
-                        anomaly_found = True
-                        dates_str = ", ".join(zero_solar_days.index.strftime('%b %d'))
-                        st.error(f"**Zero Midday Solar Output Trip:** Solar generation completely cut out between 11 AM - 1 PM on **{dates_str}**. "
-                                 f"This indicates a severe local hardware event (e.g., Tripped DC breaker, blown string fuses, or inverter error).")
+            outage_days = report_df[report_df['System_Online_Hours'] < 23.5]
+            if not outage_days.empty:
+                anomaly_found = True
+                for idx, row in outage_days.iterrows():
+                    st.error(f"**System Blackout Event:** Grid went offline on **{idx.strftime('%b %d')}** for ~{24.0 - row['System_Online_Hours']:.2f} hours.")
 
-                # 4. System Outage / Micro-blackout Check (Online Hours < 23.5 hours)
-                outage_days = report_df[report_df['System_Online_Hours'] < 23.5]
-                if not outage_days.empty:
-                    anomaly_found = True
-                    for idx, row in outage_days.iterrows():
-                        st.error(f"**System Blackout Event:** Grid went offline on **{idx.strftime('%b %d')}** for approximately "
-                                 f"{24.0 - row['System_Online_Hours']:.2f} hours. Cross-reference the fault log below for exact timing.")
+            if not anomaly_found:
+                st.success("✅ No operational anomalies detected. System parameters running within target tolerances.")
 
-                if not anomaly_found:
-                    st.success("✅ No operational anomalies detected. Lithium-ion health parameters and PV strings running within target tolerances.")
+        st.divider()
 
-            st.divider()
+        # =========================================================
+        # 4. Monthly Totals & KPI Calculations
+        # =========================================================
+        total_solar = report_df['Solar_Yield_kWh'].sum()
+        total_ac = report_df['AC_Energy_Output_kWh'].sum()
+        total_hours = report_df['System_Online_Hours'].sum()
+        avg_soc_6am = report_df['SOC_6AM_%'].mean()
+        avg_soc_6pm = report_df['SOC_6PM_%'].mean()
 
-            # =========================================================
-            # 4. Monthly Totals & KPI Calculations
-            # =========================================================
-            total_solar = report_df['Solar_Yield_kWh'].sum()
-            total_ac = report_df['AC_Energy_Output_kWh'].sum()
-            total_hours = report_df['System_Online_Hours'].sum()
-            avg_soc_6am = report_df['SOC_6AM_%'].mean()
-            avg_soc_6pm = report_df['SOC_6PM_%'].mean()
+        log_year = df_data.index[0].year
+        log_month = df_data.index[0].month
+        num_days_in_month = calendar.monthrange(log_year, log_month)[1]
+        planned_operational_hours = num_days_in_month * 24
 
-            log_year = df_data.index[0].year
-            log_month = df_data.index[0].month
-            num_days_in_month = calendar.monthrange(log_year, log_month)[1]
-            planned_operational_hours = num_days_in_month * 24
+        specific_yield = total_ac / capacity if capacity > 0 else 0
+        pr_denominator = num_days_in_month * sun_hours
+        performance_ratio = (specific_yield / pr_denominator) * 100 if pr_denominator > 0 else 0
+        cf_denominator = capacity * planned_operational_hours
+        capacity_factor = (total_ac / cf_denominator) * 100 if cf_denominator > 0 else 0
+        availability_factor = (total_hours / planned_operational_hours) * 100 if planned_operational_hours > 0 else 0
+        target_generation = sun_hours * capacity * num_days_in_month * derate
 
-            specific_yield = total_ac / grid_capacity_kwp if grid_capacity_kwp > 0 else 0
-            pr_denominator = num_days_in_month * peak_sun_hours
-            performance_ratio = (specific_yield / pr_denominator) * 100 if pr_denominator > 0 else 0
-            cf_denominator = grid_capacity_kwp * planned_operational_hours
-            capacity_factor = (total_ac / cf_denominator) * 100 if cf_denominator > 0 else 0
-            availability_factor = (total_hours / planned_operational_hours) * 100 if planned_operational_hours > 0 else 0
-            target_generation = peak_sun_hours * grid_capacity_kwp * num_days_in_month * derate_factor
+        st.subheader("Monthly Totals")
+        m1, m2, m3, m4, m5 = st.columns(5)
+        m1.metric("Total Solar Yield", f"{total_solar:,.2f} kWh")
+        m2.metric("Total AC Energy Output", f"{total_ac:,.2f} kWh")
+        m3.metric("System Online Time", f"{total_hours:,.2f} hrs")
+        m4.metric("Avg SOC (6 AM / 6 PM)", f"{avg_soc_6am:.1f}% / {avg_soc_6pm:.1f}%")
+        m5.metric("Peak AC Power", f"{peak_ac_power_kw:,.2f} kW")
 
-            st.subheader("Monthly Totals")
-            m1, m2, m3, m4, m5 = st.columns(5)
-            m1.metric("Total Solar Yield", f"{total_solar:,.2f} kWh")
-            m2.metric("Total AC Energy Output", f"{total_ac:,.2f} kWh")
-            m3.metric("System Online Time", f"{total_hours:,.2f} hrs")
-            m4.metric("Avg SOC (6 AM / 6 PM)", f"{avg_soc_6am:.1f}% / {avg_soc_6pm:.1f}%")
-            m5.metric("Peak AC Power", f"{peak_ac_power_kw:,.2f} kW")
+        st.divider()
 
-            st.divider()
+        st.subheader("Key Performance Indicators (KPIs)")
+        k1, k2, k3, k4 = st.columns(4)
+        k1.metric("Specific Yield", f"{specific_yield:,.2f} kWh/kWp")
+        k2.metric("Performance Ratio", f"{performance_ratio:.2f}%")
+        k3.metric("Capacity Factor", f"{capacity_factor:.2f}%")
+        k4.metric("Availability Factor", f"{availability_factor:.2f}%")
+        st.info(f"**Target Solar Generation:** {target_generation:,.2f} kWh")
 
-            st.subheader("Key Performance Indicators (KPIs)")
-            k1, k2, k3, k4 = st.columns(4)
-            k1.metric("Specific Yield", f"{specific_yield:,.2f} kWh/kWp")
-            k2.metric("Performance Ratio", f"{performance_ratio:.2f}%")
-            k3.metric("Capacity Factor", f"{capacity_factor:.2f}%")
-            k4.metric("Availability Factor", f"{availability_factor:.2f}%")
-            st.info(f"**Target Solar Generation:** {target_generation:,.2f} kWh")
-
-            # ==========================================
-            # --- Visualizations & Dataframes ---
-            # ==========================================
-            st.divider()
-            st.subheader("📈 High-Resolution Performance Visualizations")
+        # ==========================================
+        # --- Visualizations & Dataframes ---
+        # ==========================================
+        st.divider()
+        st.subheader("📈 High-Resolution Performance Visualizations")
+        tab1, tab2, tab3 = st.tabs(["⚡ Power Profile (kW)", "🔋 Battery SOC (%)", "⏱️ Daily Online Hours"])
+        
+        with tab1:
+            power_df = df_data[['Solar power (ALL) [kW] ALL', 'Total_AC_Output_kW']].copy()
+            power_df.columns = ['Solar Power (kW)', 'AC Output (kW)'] 
+            fig_power = px.line(power_df, y=['Solar Power (kW)', 'AC Output (kW)'], labels={'value': 'Power (kW)', 'Time': 'Date & Time'})
+            st.plotly_chart(fig_power, use_container_width=True)
             
-            tab1, tab2, tab3 = st.tabs(["⚡ Power Profile (kW)", "🔋 Battery SOC (%)", "⏱️ Daily Online Hours"])
+        with tab2:
+            if 'BSP-SOC [%] 1' in df_data.columns:
+                fig_soc = px.line(df_data, y='BSP-SOC [%] 1', labels={'BSP-SOC [%] 1': 'Battery SOC (%)'})
+                st.plotly_chart(fig_soc, use_container_width=True)
+            else:
+                st.warning("SOC data not available in these logs.")
             
-            with tab1:
-                st.markdown("**Minute-by-Minute Solar Power vs. AC Output**")
-                power_df = df_data[['Solar power (ALL) [kW] ALL', 'Total_AC_Output_kW']].copy()
-                power_df.columns = ['Solar Power (kW)', 'AC Output (kW)'] 
-                fig_power = px.line(power_df, y=['Solar Power (kW)', 'AC Output (kW)'], labels={'value': 'Power (kW)', 'Time': 'Date & Time'})
-                fig_power.update_layout(legend_title_text='', hovermode="x unified")
-                st.plotly_chart(fig_power, use_container_width=True)
-                
-            with tab2:
-                st.markdown("**Continuous State of Charge (SOC) Profile**")
-                if 'BSP-SOC [%] 1' in df_data.columns:
-                    fig_soc = px.line(df_data, y='BSP-SOC [%] 1', labels={'BSP-SOC [%] 1': 'Battery SOC (%)'})
-                    fig_soc.update_layout(hovermode="x unified")
-                    st.plotly_chart(fig_soc, use_container_width=True)
-                else:
-                    st.warning("SOC data not available in these logs.")
-                
-            with tab3:
-                st.markdown("**System Online Hours per Day**")
-                st.area_chart(report_df['System_Online_Hours'])
-                
+        with tab3:
+            st.area_chart(report_df['System_Online_Hours'])
+            
+        st.divider()
+        st.subheader("Daily Performance Summary Table")
+        st.dataframe(report_df, use_container_width=True)
+
+        # ==========================================
+        # --- Action Buttons (Download & Save) ---
+        # ==========================================
+        clean_grid_name = "".join(x for x in active_grid if x.isalnum() or x in " -_")
+        output_filename = f'{clean_grid_name}_{review_period.replace(" ", "_")}_Report.csv'
+        csv_data = report_df.to_csv().encode('utf-8')
+        
+        action_col1, action_col2, _ = st.columns([2, 2.5, 4])
+        with action_col1:
+            st.download_button(label="⬇️ Download Daily Report (CSV)", data=csv_data, file_name=output_filename, mime='text/csv', use_container_width=True)
+        
+        with action_col2:
+            if st.button("💾 Save Report to Historical Database", type="primary", use_container_width=True):
+                with st.spinner("Archiving data rows directly to Supabase..."):
+                    try:
+                        with conn.session as session:
+                            session.execute("""
+                                CREATE TABLE IF NOT EXISTS minigrid_daily_reports (
+                                    id SERIAL PRIMARY KEY,
+                                    grid_name VARCHAR(100) NOT NULL,
+                                    report_date DATE NOT NULL,
+                                    solar_yield_kwh FLOAT,
+                                    ac_energy_output_kwh FLOAT,
+                                    system_online_hours FLOAT,
+                                    soc_6am FLOAT,
+                                    soc_6pm FLOAT,
+                                    max_soc FLOAT,
+                                    min_soc FLOAT,
+                                    time_of_min_soc VARCHAR(10),
+                                    UNIQUE(grid_name, report_date)
+                                );
+                            """)
+                            
+                            for idx, row in report_df.iterrows():
+                                session.execute(
+                                    """
+                                    INSERT INTO minigrid_daily_reports 
+                                    (grid_name, report_date, solar_yield_kwh, ac_energy_output_kwh, system_online_hours, soc_6am, soc_6pm, max_soc, min_soc, time_of_min_soc)
+                                    VALUES (:grid_name, :report_date, :solar, :ac, :online, :soc6am, :soc6pm, :max_soc, :min_soc, :time_min)
+                                    ON CONFLICT (grid_name, report_date) 
+                                    DO UPDATE SET 
+                                        solar_yield_kwh = EXCLUDED.solar_yield_kwh,
+                                        ac_energy_output_kwh = EXCLUDED.ac_energy_output_kwh,
+                                        system_online_hours = EXCLUDED.system_online_hours,
+                                        soc_6am = EXCLUDED.soc_6am,
+                                        soc_6pm = EXCLUDED.soc_6pm,
+                                        max_soc = EXCLUDED.max_soc,
+                                        min_soc = EXCLUDED.min_soc,
+                                        time_of_min_soc = EXCLUDED.time_of_min_soc;
+                                    """,
+                                    {
+                                        "grid_name": active_grid,
+                                        "report_date": idx.date(),
+                                        "solar": None if pd.isna(row['Solar_Yield_kWh']) else float(row['Solar_Yield_kWh']),
+                                        "ac": None if pd.isna(row['AC_Energy_Output_kWh']) else float(row['AC_Energy_Output_kWh']),
+                                        "online": None if pd.isna(row['System_Online_Hours']) else float(row['System_Online_Hours']),
+                                        "soc6am": None if pd.isna(row['SOC_6AM_%']) else float(row['SOC_6AM_%']),
+                                        "soc6pm": None if pd.isna(row['SOC_6PM_%']) else float(row['SOC_6PM_%']),
+                                        "max_soc": None if pd.isna(row['Max_SOC_%']) else float(row['Max_SOC_%']),
+                                        "min_soc": None if pd.isna(row['Min_SOC_%']) else float(row['Min_SOC_%']),
+                                        "time_min": str(row['Time_of_Min_SOC']) if pd.notna(row['Time_of_Min_SOC']) else None
+                                    }
+                                )
+                            session.commit()
+                        st.success("🎉 Monthly data compiled and safely archived in Supabase cloud!")
+                    except Exception as e:
+                        st.error(f"Failed to communicate with Supabase: {e}")
+
+        if not df_events.empty:
             st.divider()
-
-            st.subheader("Daily Performance Summary Table")
-            st.dataframe(report_df, use_container_width=True)
-
-            # --- Action Buttons Layout (Download & Save to Cloud Database) ---
-            clean_grid_name = "".join(x for x in grid_name if x.isalnum() or x in " -_")
-            output_filename = f'{clean_grid_name}_{review_period.replace(" ", "_")}_Report.csv'
-            csv_data = report_df.to_csv().encode('utf-8')
-            
-            action_col1, action_col2, _ = st.columns([2, 2.5, 4])
-            with action_col1:
-                st.download_button(label="⬇️ Download Daily Report (CSV)", data=csv_data, file_name=output_filename, mime='text/csv', use_container_width=True)
-            
-            with action_col2:
-                if st.button("💾 Save Report to Historical Database", type="primary", use_container_width=True):
-                    with st.spinner("Archiving data rows directly to Supabase..."):
-                        try:
-                            with conn.session as session:
-                                # Ensure table schema exists
-                                session.execute("""
-                                    CREATE TABLE IF NOT EXISTS minigrid_daily_reports (
-                                        id SERIAL PRIMARY KEY,
-                                        grid_name VARCHAR(100) NOT NULL,
-                                        report_date DATE NOT NULL,
-                                        solar_yield_kwh FLOAT,
-                                        ac_energy_output_kwh FLOAT,
-                                        system_online_hours FLOAT,
-                                        soc_6am FLOAT,
-                                        soc_6pm FLOAT,
-                                        max_soc FLOAT,
-                                        min_soc FLOAT,
-                                        time_of_min_soc VARCHAR(10),
-                                        UNIQUE(grid_name, report_date)
-                                    );
-                                """)
-                                
-                                # Loop through parsed report_df and insert/overwrite values
-                                for idx, row in report_df.iterrows():
-                                    session.execute(
-                                        """
-                                        INSERT INTO minigrid_daily_reports 
-                                        (grid_name, report_date, solar_yield_kwh, ac_energy_output_kwh, system_online_hours, soc_6am, soc_6pm, max_soc, min_soc, time_of_min_soc)
-                                        VALUES (:grid_name, :report_date, :solar, :ac, :online, :soc6am, :soc6pm, :max_soc, :min_soc, :time_min)
-                                        ON CONFLICT (grid_name, report_date) 
-                                        DO UPDATE SET 
-                                            solar_yield_kwh = EXCLUDED.solar_yield_kwh,
-                                            ac_energy_output_kwh = EXCLUDED.ac_energy_output_kwh,
-                                            system_online_hours = EXCLUDED.system_online_hours,
-                                            soc_6am = EXCLUDED.soc_6am,
-                                            soc_6pm = EXCLUDED.soc_6pm,
-                                            max_soc = EXCLUDED.max_soc,
-                                            min_soc = EXCLUDED.min_soc,
-                                            time_of_min_soc = EXCLUDED.time_of_min_soc;
-                                        """,
-                                        {
-                                            "grid_name": grid_name,
-                                            "report_date": idx.date(),
-                                            "solar": None if pd.isna(row['Solar_Yield_kWh']) else float(row['Solar_Yield_kWh']),
-                                            "ac": None if pd.isna(row['AC_Energy_Output_kWh']) else float(row['AC_Energy_Output_kWh']),
-                                            "online": None if pd.isna(row['System_Online_Hours']) else float(row['System_Online_Hours']),
-                                            "soc6am": None if pd.isna(row['SOC_6AM_%']) else float(row['SOC_6AM_%']),
-                                            "soc6pm": None if pd.isna(row['SOC_6PM_%']) else float(row['SOC_6PM_%']),
-                                            "max_soc": None if pd.isna(row['Max_SOC_%']) else float(row['Max_SOC_%']),
-                                            "min_soc": None if pd.isna(row['Min_SOC_%']) else float(row['Min_SOC_%']),
-                                            "time_min": str(row['Time_of_Min_SOC']) if pd.notna(row['Time_of_Min_SOC']) else None
-                                        }
-                                    )
-                                session.commit()
-                            st.success("🎉 Monthly data compiled and safely archived in Supabase cloud!")
-                        except Exception as e:
-                            st.error(f"Failed to communicate with Supabase: {e}")
-
-            if not df_events.empty:
-                st.divider()
-                st.subheader("Top System Events / Faults")
-                top_events = df_events['Message'].value_counts().head(5).reset_index()
-                top_events.columns = ['Event Message', 'Count']
-                st.dataframe(top_events, hide_index=True)
+            st.subheader("Top System Events / Faults")
+            top_events = df_events['Message'].value_counts().head(5).reset_index()
+            top_events.columns = ['Event Message', 'Count']
+            st.dataframe(top_events, hide_index=True)
 
 # --- MODE B: HISTORICAL DATABASE EXPLORER ---
 elif app_mode == "📜 View Historical Archive Dashboard":
     st.subheader("📜 Historical Mini-Grid Data Explorer")
     
     try:
-        # Fetch the available list of unique grids stored inside the db
         available_grids_df = conn.query("SELECT DISTINCT grid_name FROM minigrid_daily_reports;")
         
         if not available_grids_df.empty:
             selected_grid = st.selectbox("Select Mini-Grid Portfolio:", available_grids_df['grid_name'])
             
-            # Extract full historical series for chosen asset
             hist_df = conn.query(
                 "SELECT * FROM minigrid_daily_reports WHERE grid_name = :name ORDER BY report_date ASC;",
                 params={"name": selected_grid}
@@ -436,7 +446,6 @@ elif app_mode == "📜 View Historical Archive Dashboard":
             
             hist_df['report_date'] = pd.to_datetime(hist_df['report_date'])
             
-            # Showcase top summary historical milestones
             h_col1, h_col2, h_col3 = st.columns(3)
             h_col1.metric("Total Logged History", f"{len(hist_df)} days")
             h_col2.metric("Cumulative Generation Archive", f"{hist_df['solar_yield_kwh'].sum():,.1f} kWh")
