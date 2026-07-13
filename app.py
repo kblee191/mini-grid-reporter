@@ -4,6 +4,7 @@ import re
 import calendar
 import plotly.express as px
 from sqlalchemy import text
+from fpdf import FPDF
 
 # Connect to our cloud database automatically using secrets config
 conn = st.connection("postgresql", type="sql")
@@ -52,6 +53,91 @@ if not st.session_state["authenticated"]:
                     st.error("Invalid username or password.")
                     
     st.stop()
+
+# =========================================================
+# 📄 PDF Generation System
+# =========================================================
+def generate_pdf_report(rep, report_df):
+    """Generates a PDF document in memory and returns it as bytes."""
+    pdf = FPDF()
+    pdf.add_page()
+    
+    # --- Title Section ---
+    pdf.set_font("helvetica", "B", 16)
+    pdf.cell(0, 10, f"Mini-Grid Performance Report: {rep['grid_name']}", new_x="LMARGIN", new_y="NEXT", align='C')
+    
+    pdf.set_font("helvetica", "I", 12)
+    pdf.cell(0, 10, f"Review Period: {rep['review_period']}", new_x="LMARGIN", new_y="NEXT", align='C')
+    pdf.ln(5)
+    
+    # --- 1. System Configuration ---
+    pdf.set_font("helvetica", "B", 12)
+    pdf.cell(0, 8, "1. System Configuration", new_x="LMARGIN", new_y="NEXT")
+    pdf.set_font("helvetica", "", 11)
+    pdf.cell(0, 6, f"Capacity: {rep['grid_capacity_kwp']} kWp", new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(0, 6, f"Peak Sun Hours: {rep['peak_sun_hours']} hours", new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(0, 6, f"Derate Factor: {rep['derate_factor']}", new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(5)
+    
+    # Recalculate variables for the PDF
+    total_solar = report_df['Solar_Yield_kWh'].sum()
+    total_ac = report_df['AC_Energy_Output_kWh'].sum()
+    total_hours = report_df['System_Online_Hours'].sum()
+    
+    log_year = report_df.index[0].year
+    log_month = report_df.index[0].month
+    num_days = calendar.monthrange(log_year, log_month)[1]
+    planned_hours = num_days * 24
+    
+    specific_yield = total_ac / rep['grid_capacity_kwp'] if rep['grid_capacity_kwp'] > 0 else 0
+    pr_denom = num_days * rep['peak_sun_hours']
+    performance_ratio = (specific_yield / pr_denom) * 100 if pr_denom > 0 else 0
+    cf_denom = rep['grid_capacity_kwp'] * planned_hours
+    capacity_factor = (total_ac / cf_denom) * 100 if cf_denom > 0 else 0
+    availability_factor = (total_hours / planned_hours) * 100 if planned_hours > 0 else 0
+    
+    # --- 2. Monthly Totals ---
+    pdf.set_font("helvetica", "B", 12)
+    pdf.cell(0, 8, "2. Monthly Totals", new_x="LMARGIN", new_y="NEXT")
+    pdf.set_font("helvetica", "", 11)
+    pdf.cell(0, 6, f"Total Solar Yield: {total_solar:,.2f} kWh", new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(0, 6, f"Total AC Energy Output: {total_ac:,.2f} kWh", new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(0, 6, f"System Online Time: {total_hours:,.2f} hrs", new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(5)
+    
+    # --- 3. Key Performance Indicators (KPIs) ---
+    pdf.set_font("helvetica", "B", 12)
+    pdf.cell(0, 8, "3. Key Performance Indicators (KPIs)", new_x="LMARGIN", new_y="NEXT")
+    pdf.set_font("helvetica", "", 11)
+    pdf.cell(0, 6, f"Specific Yield: {specific_yield:,.2f} kWh/kWp", new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(0, 6, f"Performance Ratio: {performance_ratio:.2f}%", new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(0, 6, f"Capacity Factor: {capacity_factor:.2f}%", new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(0, 6, f"Availability Factor: {availability_factor:.2f}%", new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(5)
+    
+    # --- 4. System Anomalies & Battery Health ---
+    pdf.set_font("helvetica", "B", 12)
+    pdf.cell(0, 8, "4. System Anomalies & Battery Health", new_x="LMARGIN", new_y="NEXT")
+    pdf.set_font("helvetica", "", 11)
+    
+    critical_soc_days = report_df[report_df['Min_SOC_%'] < 20.0]
+    poor_recharge_days = report_df[report_df['Max_SOC_%'] < 85.0]
+    
+    if critical_soc_days.empty and poor_recharge_days.empty:
+         pdf.cell(0, 6, "No significant battery anomalies detected.", new_x="LMARGIN", new_y="NEXT")
+    else:
+        if not critical_soc_days.empty:
+            dates_str = ", ".join(critical_soc_days.index.strftime('%b %d'))
+            pdf.set_text_color(220, 53, 69) # Red text
+            pdf.multi_cell(0, 6, f"CRITICAL DEEP DISCHARGE (<20%): Detected on {dates_str}. Minimum SOC hit {critical_soc_days['Min_SOC_%'].min():.1f}%.")
+            
+        if not poor_recharge_days.empty:
+            dates_str = ", ".join(poor_recharge_days.index.strftime('%b %d'))
+            pdf.set_text_color(253, 126, 20) # Orange text
+            pdf.multi_cell(0, 6, f"POOR RECHARGE (<85%): Batteries failed to fully charge on {dates_str}.")
+            
+    pdf.set_text_color(0, 0, 0) # Reset to black
+    return bytes(pdf.output())
 
 # =========================================================
 # 🔓 Authorized Session Area
@@ -359,14 +445,37 @@ if app_mode == "Upload New CSV Logs":
         # --- Action Buttons (Download & Save) ---
         # ==========================================
         clean_grid_name = "".join(x for x in active_grid if x.isalnum() or x in " -_")
-        output_filename = f'{clean_grid_name}_{review_period.replace(" ", "_")}_Report.csv'
+        
+        # Set up filenames
+        csv_filename = f'{clean_grid_name}_{review_period.replace(" ", "_")}_Report.csv'
+        pdf_filename = f'{clean_grid_name}_{review_period.replace(" ", "_")}_Report.pdf'
+        
+        # Prepare Data Bytes
         csv_data = report_df.to_csv().encode('utf-8')
+        pdf_data = generate_pdf_report(rep, report_df)
         
-        action_col1, action_col2, _ = st.columns([2, 2.5, 4])
+        # Create 3 columns
+        action_col1, action_col2, action_col3 = st.columns([2, 2, 2.5])
+        
         with action_col1:
-            st.download_button(label="⬇️ Download Daily Report (CSV)", data=csv_data, file_name=output_filename, mime='text/csv', use_container_width=True)
-        
+            st.download_button(
+                label="⬇️ Download Daily Report (CSV)", 
+                data=csv_data, 
+                file_name=csv_filename, 
+                mime='text/csv', 
+                use_container_width=True
+            )
+            
         with action_col2:
+            st.download_button(
+                label="📄 Download Summary (PDF)", 
+                data=pdf_data, 
+                file_name=pdf_filename, 
+                mime='application/pdf', 
+                use_container_width=True
+            )
+        
+        with action_col3:
             if st.button("💾 Save Report to Historical Database", type="primary", use_container_width=True):
                 with st.spinner("Archiving data rows directly to Supabase..."):
                     try:
