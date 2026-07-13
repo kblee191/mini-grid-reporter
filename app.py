@@ -76,7 +76,6 @@ def generate_pdf_report(rep, report_df):
     pdf.set_font("helvetica", "", 11)
     pdf.cell(0, 6, f"Capacity: {rep['grid_capacity_kwp']} kWp", new_x="LMARGIN", new_y="NEXT")
     pdf.cell(0, 6, f"Peak Sun Hours: {rep['peak_sun_hours']} hours", new_x="LMARGIN", new_y="NEXT")
-    pdf.cell(0, 6, f"Derate Factor: {rep['derate_factor']}", new_x="LMARGIN", new_y="NEXT")
     pdf.ln(5)
     
     # Recalculate variables for the PDF
