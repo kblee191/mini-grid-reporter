@@ -167,7 +167,7 @@ def generate_pdf_report(rep, report_df):
         if not critical_soc_days.empty:
             dates_str = ", ".join(critical_soc_days.index.strftime('%b %d'))
             pdf.set_text_color(220, 53, 69) # Warning Red
-            pdf.multi_cell(0, 6, f"  ![CRITICAL DEEP DISCHARGE (<20%)]: Logged on {dates_str}. Minimum SOC hit below 20% {critical_soc_days['Min_SOC_%'].min():.1f}%.", new_x="LMARGIN", new_y="NEXT")
+            pdf.multi_cell(0, 6, f"  ![CRITICAL DEEP DISCHARGE (<20%)]: Logged on {dates_str}. Minimum SOC hit {critical_soc_days['Min_SOC_%'].min():.1f}%.", new_x="LMARGIN", new_y="NEXT")
             
         if not poor_recharge_days.empty:
             dates_str = ", ".join(poor_recharge_days.index.strftime('%b %d'))
