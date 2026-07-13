@@ -10,7 +10,7 @@ from fpdf import FPDF
 conn = st.connection("postgresql", type="sql")
 
 # Page Configuration
-st.set_page_config(page_title="Mini-Grid Performance", layout="wide", page_icon="⚡")
+st.set_page_config(page_title="Mini-Grid Performance Tool", layout="wide", page_icon="⚡")
 
 # Initialize session state memory keys if they don't exist
 if "authenticated" not in st.session_state:
@@ -101,7 +101,7 @@ def generate_pdf_report(rep, report_df):
     pdf.set_font("helvetica", "", 11)
     pdf.cell(0, 6, f"Total Solar Yield: {total_solar:,.2f} kWh", new_x="LMARGIN", new_y="NEXT")
     pdf.cell(0, 6, f"Total AC Energy Output: {total_ac:,.2f} kWh", new_x="LMARGIN", new_y="NEXT")
-    pdf.cell(0, 6, f"System Online Time: {total_hours:,.2f} hrs", new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(0, 6, f"System Online Time: {total_hours:,.2f} out of {planned_hours} total hours", new_x="LMARGIN", new_y="NEXT")
     pdf.ln(5)
     
     # --- 3. Key Performance Indicators (KPIs) ---
@@ -125,15 +125,16 @@ def generate_pdf_report(rep, report_df):
     if critical_soc_days.empty and poor_recharge_days.empty:
          pdf.cell(0, 6, "No significant battery anomalies detected.", new_x="LMARGIN", new_y="NEXT")
     else:
+        # Added explicit layout resets (new_x/new_y) to avoid horizontal spacing overflow crashes
         if not critical_soc_days.empty:
             dates_str = ", ".join(critical_soc_days.index.strftime('%b %d'))
             pdf.set_text_color(220, 53, 69) # Red text
-            pdf.multi_cell(0, 6, f"CRITICAL DEEP DISCHARGE (<20%): Detected on {dates_str}. Minimum SOC hit {critical_soc_days['Min_SOC_%'].min():.1f}%.")
+            pdf.multi_cell(0, 6, f"CRITICAL DEEP DISCHARGE (<20%): Detected on {dates_str}. Minimum SOC hit {critical_soc_days['Min_SOC_%'].min():.1f}%.", new_x="LMARGIN", new_y="NEXT")
             
         if not poor_recharge_days.empty:
             dates_str = ", ".join(poor_recharge_days.index.strftime('%b %d'))
             pdf.set_text_color(253, 126, 20) # Orange text
-            pdf.multi_cell(0, 6, f"POOR RECHARGE (<85%): Batteries failed to fully charge on {dates_str}.")
+            pdf.multi_cell(0, 6, f"POOR RECHARGE (<85%): Batteries failed to fully charge on {dates_str}.", new_x="LMARGIN", new_y="NEXT")
             
     pdf.set_text_color(0, 0, 0) # Reset to black
     return bytes(pdf.output())
@@ -395,11 +396,20 @@ if app_mode == "Upload New CSV Logs":
         availability_factor = (total_hours / planned_operational_hours) * 100 if planned_operational_hours > 0 else 0
         target_generation = sun_hours * capacity * num_days_in_month * derate
 
+        downtime_hours = max(0.0, planned_operational_hours - total_hours)
+
         st.subheader("Monthly Totals")
         m1, m2, m3, m4, m5 = st.columns(5)
         m1.metric("Total Solar Yield", f"{total_solar:,.2f} kWh")
         m2.metric("Total AC Energy Output", f"{total_ac:,.2f} kWh")
-        m3.metric("System Online Time", f"{total_hours:,.2f} hrs")
+        
+        m3.metric(
+            label="System Online Time", 
+            value=f"{total_hours:,.1f} / {planned_operational_hours} hrs",
+            delta=f"-{downtime_hours:,.1f} hrs offline" if downtime_hours > 0.5 else "Perfect Uptime 100%",
+            delta_color="inverse" if downtime_hours > 0.5 else "normal"
+        )
+        
         m4.metric("Avg SOC (6 AM / 6 PM)", f"{avg_soc_6am:.1f}% / {avg_soc_6pm:.1f}%")
         m5.metric("Peak AC Power", f"{peak_ac_power_kw:,.2f} kW")
 
@@ -543,13 +553,11 @@ elif app_mode == "📜 View Historical Archive Dashboard":
     st.subheader("📜 Historical Mini-Grid Data Explorer")
     
     try:
-        # Using ttl=0 to bypass cache and fetch fresh databases automatically
         available_grids_df = conn.query("SELECT DISTINCT grid_name FROM minigrid_daily_reports;", ttl=0)
         
         if not available_grids_df.empty:
             selected_grid = st.selectbox("Select Mini-Grid Portfolio:", available_grids_df['grid_name'])
             
-            # Using ttl=0 to ensure immediate view of recently saved metrics
             hist_df = conn.query(
                 "SELECT * FROM minigrid_daily_reports WHERE grid_name = :name ORDER BY report_date ASC;",
                 params={"name": selected_grid},
