@@ -176,12 +176,12 @@ def generate_pdf_report(rep, report_df):
         if not critical_soc_days.empty:
             dates_str = ", ".join(critical_soc_days.index.strftime('%b %d'))
             pdf.set_text_color(220, 53, 69) # Warning Red
-            pdf.multi_cell(0, 6, f"  [!] CRITICAL DEEP DISCHARGE (<20%): Logged on {dates_str}. Minimum SOC bottomed out at {critical_soc_days['Min_SOC_%'].min():.1f}%.", new_x="LMARGIN", new_y="NEXT")
+            pdf.multi_cell(0, 6, f"  [!] CRITICAL DEEP DISCHARGE (<20%): Logged on {dates_str}.", new_x="LMARGIN", new_y="NEXT")
             
         if not poor_recharge_days.empty:
             dates_str = ", ".join(poor_recharge_days.index.strftime('%b %d'))
             pdf.set_text_color(253, 126, 20) # Warning Orange
-            pdf.multi_cell(0, 6, f"  [!] POOR RECHARGE (<85%): Incomplete daytime restoration detected on {dates_str}.", new_x="LMARGIN", new_y="NEXT")
+            pdf.multi_cell(0, 6, f"  [!] POOR RECHARGE (<85%): Battery bank failed to charge above 85% in the day. Incomplete daytime charging detected on {dates_str}.", new_x="LMARGIN", new_y="NEXT")
             
         if not zero_solar_days.empty:
             dates_str = ", ".join(zero_solar_days.index.strftime('%b %d'))
