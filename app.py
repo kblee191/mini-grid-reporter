@@ -10,7 +10,7 @@ from fpdf import FPDF
 conn = st.connection("postgresql", type="sql")
 
 # Page Configuration
-st.set_page_config(page_title="Mini-Grid Reporter", layout="wide", page_icon="⚡")
+st.set_page_config(page_title="Mini-Grid Performance", layout="wide", page_icon="⚡")
 
 # Initialize session state memory keys if they don't exist
 if "authenticated" not in st.session_state:
@@ -160,7 +160,7 @@ st.header("1. Mini-Grid Configuration")
 col1, col2, col3, col4 = st.columns(4)
 
 with col1:
-    grid_name = st.text_input("Mini-grid Name", value="My Mini-Grid")
+    grid_name = st.text_input("Mini-grid Name", value="Mini-Grid")
 with col2:
     grid_capacity_kwp = st.number_input("Capacity (kWp)", min_value=0.1, value=10.0, step=0.1)
 with col3:
