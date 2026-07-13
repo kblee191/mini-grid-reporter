@@ -62,6 +62,9 @@ def generate_pdf_report(rep, report_df):
     pdf = FPDF()
     pdf.add_page()
     
+    df_data = rep.get("df_data")
+    df_events = rep.get("df_events")
+    
     # Define color scheme (RGB)
     primary_color = (24, 43, 73)     # Deep Corporate Navy
     text_dark = (50, 50, 50)         # Charcoal for clean reading
@@ -99,6 +102,7 @@ def generate_pdf_report(rep, report_df):
     pdf.set_font("helvetica", "", 10)
     pdf.cell(0, 6, f"  * Capacity: {rep['grid_capacity_kwp']} kWp", new_x="LMARGIN", new_y="NEXT")
     pdf.cell(0, 6, f"  * Peak Sun Hours: {rep['peak_sun_hours']} hours", new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(0, 6, f"  * Derate Factor: {rep['derate_factor']}", new_x="LMARGIN", new_y="NEXT")
     
     draw_section_divider()
     
@@ -140,7 +144,7 @@ def generate_pdf_report(rep, report_df):
     # --- 3. Key Performance Indicators (KPIs) ---
     pdf.set_text_color(*primary_color)
     pdf.set_font("helvetica", "B", 12)
-    pdf.cell(0, 8, "> Key Performance Indicators (KPIs)", new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(0, 8, "> Asset Performance Indicators (KPIs)", new_x="LMARGIN", new_y="NEXT")
     
     pdf.set_text_color(*text_dark)
     pdf.set_font("helvetica", "", 10)
@@ -151,29 +155,58 @@ def generate_pdf_report(rep, report_df):
     
     draw_section_divider()
     
-    # --- 4. System Anomalies & Battery Health ---
+    # --- 4. System Anomalies & Battery Health (Excluding Blackouts) ---
     pdf.set_text_color(*primary_color)
     pdf.set_font("helvetica", "B", 12)
-    pdf.cell(0, 8, "> Critical Diagnostics & Warnings", new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(0, 8, "> Critical Diagnostics & Warnings (Anomalies)", new_x="LMARGIN", new_y="NEXT")
     
     pdf.set_font("helvetica", "", 10)
     critical_soc_days = report_df[report_df['Min_SOC_%'] < 20.0]
     poor_recharge_days = report_df[report_df['Max_SOC_%'] < 85.0]
     
-    if critical_soc_days.empty and poor_recharge_days.empty:
+    zero_solar_days = pd.Series(dtype=float)
+    if df_data is not None and 'Solar power (ALL) [kW] ALL' in df_data.columns:
+        midday_solar = df_data.between_time('11:00', '13:00')
+        daily_midday_avg = midday_solar['Solar power (ALL) [kW] ALL'].resample('D').mean()
+        zero_solar_days = daily_midday_avg[daily_midday_avg < 0.1]
+        
+    if critical_soc_days.empty and poor_recharge_days.empty and zero_solar_days.empty:
          pdf.set_text_color(40, 167, 69) # Clean green text
-         pdf.cell(0, 6, " Nominal Status: No battery or recharge anomalies detected.", new_x="LMARGIN", new_y="NEXT")
+         pdf.cell(0, 6, "  [-] Nominal Status: No critical battery or solar recharge anomalies detected.", new_x="LMARGIN", new_y="NEXT")
     else:
         if not critical_soc_days.empty:
             dates_str = ", ".join(critical_soc_days.index.strftime('%b %d'))
             pdf.set_text_color(220, 53, 69) # Warning Red
-            pdf.multi_cell(0, 6, f"  ![CRITICAL DEEP DISCHARGE (<20%)]: Logged on {dates_str}.", new_x="LMARGIN", new_y="NEXT")
+            pdf.multi_cell(0, 6, f"  [!] CRITICAL DEEP DISCHARGE (<20%): Logged on {dates_str}. Minimum SOC bottomed out at {critical_soc_days['Min_SOC_%'].min():.1f}%.", new_x="LMARGIN", new_y="NEXT")
             
         if not poor_recharge_days.empty:
             dates_str = ", ".join(poor_recharge_days.index.strftime('%b %d'))
             pdf.set_text_color(253, 126, 20) # Warning Orange
-            pdf.multi_cell(0, 6, f"  ![POOR RECHARGE (<85%)]: Failure to charge batteries above 85% in the day. Detected on {dates_str}.", new_x="LMARGIN", new_y="NEXT")
+            pdf.multi_cell(0, 6, f"  [!] POOR RECHARGE (<85%): Incomplete daytime restoration detected on {dates_str}.", new_x="LMARGIN", new_y="NEXT")
             
+        if not zero_solar_days.empty:
+            dates_str = ", ".join(zero_solar_days.index.strftime('%b %d'))
+            pdf.set_text_color(220, 53, 69) # Warning Red
+            pdf.multi_cell(0, 6, f"  [!] ZERO MIDDAY SOLAR OUTPUT TRIP: Solar generation cut out completely between 11 AM - 1 PM on {dates_str}.", new_x="LMARGIN", new_y="NEXT")
+            
+    # --- 5. Top System Events / Faults ---
+    draw_section_divider()
+    pdf.set_text_color(*primary_color)
+    pdf.set_font("helvetica", "B", 12)
+    pdf.cell(0, 8, "> Top System Events & Fault Logs", new_x="LMARGIN", new_y="NEXT")
+    
+    pdf.set_text_color(*text_dark)
+    if df_events is not None and not df_events.empty:
+        top_events = df_events['Message'].value_counts().head(5).reset_index()
+        top_events.columns = ['Message', 'Count']
+        for idx, row in top_events.iterrows():
+            pdf.set_font("helvetica", "", 10)
+            msg_text = f"  * Count: {row['Count']}x  |  {row['Message']}"
+            pdf.multi_cell(0, 6, msg_text, new_x="LMARGIN", new_y="NEXT")
+    else:
+        pdf.set_font("helvetica", "I", 10)
+        pdf.cell(0, 6, "  No system event logs recorded for this period.", new_x="LMARGIN", new_y="NEXT")
+        
     pdf.set_text_color(0, 0, 0) 
     return bytes(pdf.output())
 
