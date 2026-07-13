@@ -33,7 +33,7 @@ def check_credentials(username, password):
 
 # Show login screen if not authenticated
 if not st.session_state["authenticated"]:
-    st.markdown("<h2 style='text-align: center;'>⚡ Mini-Grid Reporter Portal</h2>", unsafe_allow_html=True)
+    st.markdown("<h2 style='text-align: center;'>⚡ Mini-Grid Performance Tool</h2>", unsafe_allow_html=True)
     
     _, login_col, _ = st.columns([1, 1, 1])
     with login_col:
