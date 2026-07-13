@@ -55,33 +55,60 @@ if not st.session_state["authenticated"]:
     st.stop()
 
 # =========================================================
-# 📄 PDF Generation System
+# 📄 PDF Generation System (Styled Executive Theme)
 # =========================================================
 def generate_pdf_report(rep, report_df):
-    """Generates a PDF document in memory and returns it as bytes."""
+    """Generates a styled PDF document in memory and returns it as bytes."""
     pdf = FPDF()
     pdf.add_page()
     
+    # Define color scheme (RGB)
+    primary_color = (24, 43, 73)     # Deep Corporate Navy
+    text_dark = (50, 50, 50)         # Charcoal for clean reading
+    muted_gray = (180, 180, 180)     # Divider line grey
+    
     # --- Title Section ---
-    pdf.set_font("helvetica", "B", 16)
+    pdf.set_text_color(*primary_color)
+    pdf.set_font("helvetica", "B", 18)
     pdf.cell(0, 10, f"Mini-Grid Performance Report: {rep['grid_name']}", new_x="LMARGIN", new_y="NEXT", align='C')
     
-    pdf.set_font("helvetica", "I", 12)
-    pdf.cell(0, 10, f"Review Period: {rep['review_period']}", new_x="LMARGIN", new_y="NEXT", align='C')
-    pdf.ln(5)
+    pdf.set_text_color(100, 100, 100)
+    pdf.set_font("helvetica", "I", 11)
+    pdf.cell(0, 6, f"Review Period: {rep['review_period']}", new_x="LMARGIN", new_y="NEXT", align='C')
     
+    # Top Accent Title Line
+    pdf.set_draw_color(*primary_color)
+    pdf.set_line_width(0.8)
+    pdf.line(10, pdf.get_y() + 4, 200, pdf.get_y() + 4)
+    pdf.ln(10)
+    
+    # Helper to draw clean section dividers
+    def draw_section_divider():
+        current_y = pdf.get_y() + 2
+        pdf.set_draw_color(*muted_gray)
+        pdf.set_line_width(0.2)
+        pdf.line(10, current_y, 200, current_y)
+        pdf.ln(6)
+
     # --- 1. System Configuration ---
+    pdf.set_text_color(*primary_color)
     pdf.set_font("helvetica", "B", 12)
-    pdf.cell(0, 8, "1. System Configuration", new_x="LMARGIN", new_y="NEXT")
-    pdf.set_font("helvetica", "", 11)
-    pdf.cell(0, 6, f"Capacity: {rep['grid_capacity_kwp']} kWp", new_x="LMARGIN", new_y="NEXT")
-    pdf.cell(0, 6, f"Peak Sun Hours: {rep['peak_sun_hours']} hours", new_x="LMARGIN", new_y="NEXT")
-    pdf.ln(5)
+    pdf.cell(0, 8, "> System Configuration", new_x="LMARGIN", new_y="NEXT")
     
-    # Recalculate variables for the PDF
+    pdf.set_text_color(*text_dark)
+    pdf.set_font("helvetica", "", 10)
+    pdf.cell(0, 6, f"  * Capacity: {rep['grid_capacity_kwp']} kWp", new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(0, 6, f"  * Peak Sun Hours: {rep['peak_sun_hours']} hours", new_x="LMARGIN", new_y="NEXT")
+    
+    draw_section_divider()
+    
+    # Recalculate metrics for accurate print out
     total_solar = report_df['Solar_Yield_kWh'].sum()
     total_ac = report_df['AC_Energy_Output_kWh'].sum()
     total_hours = report_df['System_Online_Hours'].sum()
+    avg_soc_6am = report_df['SOC_6AM_%'].mean()
+    avg_soc_6pm = report_df['SOC_6PM_%'].mean()
+    peak_ac_power_kw = rep['peak_ac_power_kw']
     
     log_year = report_df.index[0].year
     log_month = report_df.index[0].month
@@ -96,47 +123,58 @@ def generate_pdf_report(rep, report_df):
     availability_factor = (total_hours / planned_hours) * 100 if planned_hours > 0 else 0
     
     # --- 2. Monthly Totals ---
+    pdf.set_text_color(*primary_color)
     pdf.set_font("helvetica", "B", 12)
-    pdf.cell(0, 8, "2. Monthly Totals", new_x="LMARGIN", new_y="NEXT")
-    pdf.set_font("helvetica", "", 11)
-    pdf.cell(0, 6, f"Total Solar Yield: {total_solar:,.2f} kWh", new_x="LMARGIN", new_y="NEXT")
-    pdf.cell(0, 6, f"Total AC Energy Output: {total_ac:,.2f} kWh", new_x="LMARGIN", new_y="NEXT")
-    pdf.cell(0, 6, f"System Online Time: {total_hours:,.2f} out of {planned_hours} total hours", new_x="LMARGIN", new_y="NEXT")
-    pdf.ln(5)
+    pdf.cell(0, 8, "> Monthly Production Totals", new_x="LMARGIN", new_y="NEXT")
+    
+    pdf.set_text_color(*text_dark)
+    pdf.set_font("helvetica", "", 10)
+    pdf.cell(0, 6, f"  * Total Solar Yield: {total_solar:,.2f} kWh", new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(0, 6, f"  * Total AC Energy Output: {total_ac:,.2f} kWh", new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(0, 6, f"  * Peak AC Power Demand: {peak_ac_power_kw:,.2f} kW", new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(0, 6, f"  * System Operational Time: {total_hours:,.2f} / {planned_hours} total hours", new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(0, 6, f"  * Battery State-of-Charge (Avg 6AM / 6PM): {avg_soc_6am:.1f}% / {avg_soc_6pm:.1f}%", new_x="LMARGIN", new_y="NEXT")
+    
+    draw_section_divider()
     
     # --- 3. Key Performance Indicators (KPIs) ---
+    pdf.set_text_color(*primary_color)
     pdf.set_font("helvetica", "B", 12)
-    pdf.cell(0, 8, "3. Key Performance Indicators (KPIs)", new_x="LMARGIN", new_y="NEXT")
-    pdf.set_font("helvetica", "", 11)
-    pdf.cell(0, 6, f"Specific Yield: {specific_yield:,.2f} kWh/kWp", new_x="LMARGIN", new_y="NEXT")
-    pdf.cell(0, 6, f"Performance Ratio: {performance_ratio:.2f}%", new_x="LMARGIN", new_y="NEXT")
-    pdf.cell(0, 6, f"Capacity Factor: {capacity_factor:.2f}%", new_x="LMARGIN", new_y="NEXT")
-    pdf.cell(0, 6, f"Availability Factor: {availability_factor:.2f}%", new_x="LMARGIN", new_y="NEXT")
-    pdf.ln(5)
+    pdf.cell(0, 8, "> Asset Performance Indicators (KPIs)", new_x="LMARGIN", new_y="NEXT")
+    
+    pdf.set_text_color(*text_dark)
+    pdf.set_font("helvetica", "", 10)
+    pdf.cell(0, 6, f"  * Specific Yield: {specific_yield:,.2f} kWh/kWp", new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(0, 6, f"  * Performance Ratio (PR): {performance_ratio:.2f}%", new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(0, 6, f"  * Asset Capacity Factor: {capacity_factor:.2f}%", new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(0, 6, f"  * Grid Availability Factor: {availability_factor:.2f}%", new_x="LMARGIN", new_y="NEXT")
+    
+    draw_section_divider()
     
     # --- 4. System Anomalies & Battery Health ---
+    pdf.set_text_color(*primary_color)
     pdf.set_font("helvetica", "B", 12)
-    pdf.cell(0, 8, "4. System Anomalies & Battery Health", new_x="LMARGIN", new_y="NEXT")
-    pdf.set_font("helvetica", "", 11)
+    pdf.cell(0, 8, "> Critical Diagnostics & Warnings", new_x="LMARGIN", new_y="NEXT")
     
+    pdf.set_font("helvetica", "", 10)
     critical_soc_days = report_df[report_df['Min_SOC_%'] < 20.0]
     poor_recharge_days = report_df[report_df['Max_SOC_%'] < 85.0]
     
     if critical_soc_days.empty and poor_recharge_days.empty:
-         pdf.cell(0, 6, "No significant battery anomalies detected.", new_x="LMARGIN", new_y="NEXT")
+         pdf.set_text_color(40, 167, 69) # Clean green text
+         pdf.cell(0, 6, "  ✅ Nominal Status: No battery or recharge anomalies detected.", new_x="LMARGIN", new_y="NEXT")
     else:
-        # Added explicit layout resets (new_x/new_y) to avoid horizontal spacing overflow crashes
         if not critical_soc_days.empty:
             dates_str = ", ".join(critical_soc_days.index.strftime('%b %d'))
-            pdf.set_text_color(220, 53, 69) # Red text
-            pdf.multi_cell(0, 6, f"CRITICAL DEEP DISCHARGE (<20%): Detected on {dates_str}. Minimum SOC hit {critical_soc_days['Min_SOC_%'].min():.1f}%.", new_x="LMARGIN", new_y="NEXT")
+            pdf.set_text_color(220, 53, 69) # Warning Red
+            pdf.multi_cell(0, 6, f"  ![CRITICAL DEEP DISCHARGE (<20%)]: Logged on {dates_str}. Minimum SOC bottomed out at {critical_soc_days['Min_SOC_%'].min():.1f}%.", new_x="LMARGIN", new_y="NEXT")
             
         if not poor_recharge_days.empty:
             dates_str = ", ".join(poor_recharge_days.index.strftime('%b %d'))
-            pdf.set_text_color(253, 126, 20) # Orange text
-            pdf.multi_cell(0, 6, f"POOR RECHARGE (<85%): Batteries failed to fully charge on {dates_str}.", new_x="LMARGIN", new_y="NEXT")
+            pdf.set_text_color(253, 126, 20) # Warning Orange
+            pdf.multi_cell(0, 6, f"  ![POOR RECHARGE (<85%)]: Incomplete daytime restoration detected on {dates_str}.", new_x="LMARGIN", new_y="NEXT")
             
-    pdf.set_text_color(0, 0, 0) # Reset to black
+    pdf.set_text_color(0, 0, 0) 
     return bytes(pdf.output())
 
 # =========================================================
