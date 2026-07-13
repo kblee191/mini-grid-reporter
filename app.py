@@ -144,7 +144,7 @@ def generate_pdf_report(rep, report_df):
     # --- 3. Key Performance Indicators (KPIs) ---
     pdf.set_text_color(*primary_color)
     pdf.set_font("helvetica", "B", 12)
-    pdf.cell(0, 8, "> Asset Performance Indicators (KPIs)", new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(0, 8, "> Key Performance Indicators (KPIs)", new_x="LMARGIN", new_y="NEXT")
     
     pdf.set_text_color(*text_dark)
     pdf.set_font("helvetica", "", 10)
