@@ -162,7 +162,7 @@ def generate_pdf_report(rep, report_df):
     
     if critical_soc_days.empty and poor_recharge_days.empty:
          pdf.set_text_color(40, 167, 69) # Clean green text
-         pdf.cell(0, 6, "  ✅ Nominal Status: No battery or recharge anomalies detected.", new_x="LMARGIN", new_y="NEXT")
+         pdf.cell(0, 6, " Nominal Status: No battery or recharge anomalies detected.", new_x="LMARGIN", new_y="NEXT")
     else:
         if not critical_soc_days.empty:
             dates_str = ", ".join(critical_soc_days.index.strftime('%b %d'))
