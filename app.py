@@ -65,7 +65,7 @@ with st.sidebar:
         st.rerun()
     st.divider()
 
-st.title("⚡ Mini-Grid Monthly Performance Reporter")
+st.title("⚡ Mini-Grid Monthly Performance")
 st.markdown("Analyze raw system logs and maintain a central historical archive for your mini-grid operations.")
 
 # =========================================================
