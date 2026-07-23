@@ -10,7 +10,7 @@ from fpdf import FPDF
 conn = st.connection("postgresql", type="sql")
 
 # Page Configuration
-st.set_page_config(page_title="Mini-Grid Performance Tool", layout="wide", page_icon="⚡")
+st.set_page_config(page_title="Mini-Grid Performance", layout="wide", page_icon="⚡")
 
 # Initialize session state memory keys if they don't exist
 if "authenticated" not in st.session_state:
