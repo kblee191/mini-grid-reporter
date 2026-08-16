@@ -322,7 +322,7 @@ if app_mode == "Upload New CSV Logs":
                 st.error("Error: No valid system data was found in the selected files.")
                 st.stop()
 
-           df_data = pd.DataFrame(data_records)
+                df_data = pd.DataFrame(data_records)
             
             # Use a flexible datetime parser to skip corrupted timestamp rows instead of crashing
             df_data['Time'] = pd.to_datetime(df_data['Time'], dayfirst=True, errors='coerce')
