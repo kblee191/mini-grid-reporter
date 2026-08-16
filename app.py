@@ -322,20 +322,18 @@ if app_mode == "Upload New CSV Logs":
                 st.error("Error: No valid system data was found in the selected files.")
                 st.stop()
 
-                df_data = pd.DataFrame(data_records)
-            
-                # --- Make sure this exact line is included! ---
-                df_data = pd.DataFrame(data_records)
-            
-                # Use a flexible datetime parser to skip corrupted timestamp rows instead of crashing
-                df_data['Time'] = pd.to_datetime(df_data['Time'], dayfirst=True, errors='coerce')
-                df_data = df_data.dropna(subset=['Time']) # Remove the rows that couldn't be read
-            
-                df_data.set_index('Time', inplace=True)
-                df_data = df_data.sort_index()
-            
-                df_events = pd.DataFrame(event_records)
-                review_period = df_data.index[0].strftime('%B %Y')
+            # --- NOTICE THE INDENTATION MOVED TO THE LEFT HERE ---
+            df_data = pd.DataFrame(data_records)
+        
+            # Use a flexible datetime parser to skip corrupted timestamp rows instead of crashing
+            df_data['Time'] = pd.to_datetime(df_data['Time'], dayfirst=True, errors='coerce')
+            df_data = df_data.dropna(subset=['Time']) # Remove the rows that couldn't be read
+        
+            df_data.set_index('Time', inplace=True)
+            df_data = df_data.sort_index()
+        
+            df_events = pd.DataFrame(event_records)
+            review_period = df_data.index[0].strftime('%B %Y')
 
             if 'Solar power (ALL) [kW] ALL' in df_data.columns:
                 daily_solar_kwh = df_data['Solar power (ALL) [kW] ALL'].resample('D').sum() / 60
