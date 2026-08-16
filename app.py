@@ -322,11 +322,14 @@ if app_mode == "Upload New CSV Logs":
                 st.error("Error: No valid system data was found in the selected files.")
                 st.stop()
 
-            df_data = pd.DataFrame(data_records)
-            df_data['Time'] = pd.to_datetime(df_data['Time'], format='%d.%m.%Y %H:%M')
+           df_data = pd.DataFrame(data_records)
+            
+            # Use a flexible datetime parser to skip corrupted timestamp rows instead of crashing
+            df_data['Time'] = pd.to_datetime(df_data['Time'], dayfirst=True, errors='coerce')
+            df_data = df_data.dropna(subset=['Time']) # Remove the rows that couldn't be read
+            
             df_data.set_index('Time', inplace=True)
             df_data = df_data.sort_index()
-
             df_events = pd.DataFrame(event_records)
             review_period = df_data.index[0].strftime('%B %Y')
 
