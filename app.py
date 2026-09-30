@@ -3,11 +3,11 @@ import pandas as pd
 import re
 import calendar
 import plotly.express as px
-from sqlalchemy import text
 from fpdf import FPDF
+import os # Added for local file checking
 
-# Connect to our cloud database automatically using secrets config
-conn = st.connection("postgresql", type="sql")
+# Define the local Excel database file
+DB_FILE = "minigrid_historical_database.xlsx"
 
 # Page Configuration
 st.set_page_config(page_title="Mini-Grid Performance", layout="wide", page_icon="⚡")
@@ -560,26 +560,43 @@ if app_mode == "Upload New CSV Logs":
             )
         
         with action_col3:
-            if st.button("💾 Save Report to Historical Database", type="primary", use_container_width=True):
-                with st.spinner("Archiving data rows directly to Supabase..."):
+            if st.button("💾 Save Report to Local Excel Database", type="primary", use_container_width=True):
+                with st.spinner("Archiving data rows to local Excel file..."):
                     try:
-                        with conn.session as session:
-                            session.execute(text("""
-                                CREATE TABLE IF NOT EXISTS minigrid_daily_reports (
-                                    id SERIAL PRIMARY KEY,
-                                    grid_name VARCHAR(100) NOT NULL,
-                                    report_date DATE NOT NULL,
-                                    solar_yield_kwh FLOAT,
-                                    ac_energy_output_kwh FLOAT,
-                                    system_online_hours FLOAT,
-                                    soc_6am FLOAT,
-                                    soc_6pm FLOAT,
-                                    max_soc FLOAT,
-                                    min_soc FLOAT,
-                                    time_of_min_soc VARCHAR(10),
-                                    UNIQUE(grid_name, report_date)
-                                );
-                            """))
+                        # Prepare dataframe to match our historical column formats
+                        new_data = report_df.copy().reset_index()
+                        new_data.rename(columns={
+                            'Time': 'report_date',
+                            'Solar_Yield_kWh': 'solar_yield_kwh',
+                            'AC_Energy_Output_kWh': 'ac_energy_output_kwh',
+                            'System_Online_Hours': 'system_online_hours',
+                            'SOC_6AM_%': 'soc_6am',
+                            'SOC_6PM_%': 'soc_6pm',
+                            'Max_SOC_%': 'max_soc',
+                            'Min_SOC_%': 'min_soc',
+                            'Time_of_Min_SOC': 'time_of_min_soc'
+                        }, inplace=True)
+                        
+                        new_data['grid_name'] = active_grid
+                        new_data['report_date'] = pd.to_datetime(new_data['report_date']).dt.date
+                        
+                        # Load existing Excel database if it exists
+                        if os.path.exists(DB_FILE):
+                            db_df = pd.read_excel(DB_FILE)
+                            db_df['report_date'] = pd.to_datetime(db_df['report_date']).dt.date
+                            
+                            # Upsert: Drop any existing overlapping dates for this specific grid, then append new data
+                            dates_to_update = new_data['report_date']
+                            db_df = db_df[~((db_df['grid_name'] == active_grid) & (db_df['report_date'].isin(dates_to_update)))]
+                            db_df = pd.concat([db_df, new_data], ignore_index=True)
+                        else:
+                            db_df = new_data
+                            
+                        # Save back to Excel
+                        db_df.to_excel(DB_FILE, index=False)
+                        st.success("🎉 Monthly data successfully archived to your local Excel database!")
+                    except Exception as e:
+                        st.error(f"Failed to save locally: {e}")
                             
                             for idx, row in report_df.iterrows():
                                 session.execute(
@@ -627,44 +644,45 @@ if app_mode == "Upload New CSV Logs":
 elif app_mode == "📜 View Historical Archive Dashboard":
     st.subheader("📜 Historical Mini-Grid Data Explorer")
     
-    try:
-        available_grids_df = conn.query("SELECT DISTINCT grid_name FROM minigrid_daily_reports;", ttl=0)
-        
-        if not available_grids_df.empty:
-            selected_grid = st.selectbox("Select Mini-Grid Portfolio:", available_grids_df['grid_name'])
+    if os.path.exists(DB_FILE):
+        try:
+            # Read local Excel file
+            hist_db = pd.read_excel(DB_FILE)
+            available_grids = hist_db['grid_name'].unique()
             
-            hist_df = conn.query(
-                "SELECT * FROM minigrid_daily_reports WHERE grid_name = :name ORDER BY report_date ASC;",
-                params={"name": selected_grid},
-                ttl=0
-            )
-            
-            hist_df['report_date'] = pd.to_datetime(hist_df['report_date'])
-            
-            h_col1, h_col2, h_col3 = st.columns(3)
-            h_col1.metric("Total Logged History", f"{len(hist_df)} days")
-            h_col2.metric("Cumulative Generation Archive", f"{hist_df['solar_yield_kwh'].sum():,.1f} kWh")
-            h_col3.metric("Cumulative Energy Served", f"{hist_df['ac_energy_output_kwh'].sum():,.1f} kWh")
-            
-            st.write("### 📈 Long-term Energy Metrics Analysis")
-            fig_hist = px.line(hist_df, x="report_date", y=["solar_yield_kwh", "ac_energy_output_kwh"], 
-                               labels={"value": "Energy Metrics (kWh)", "report_date": "Observation Date"},
-                               title=f"Archived Asset Yield Analysis for {selected_grid}")
-            fig_hist.update_layout(hovermode="x unified", legend_title_text="")
-            st.plotly_chart(fig_hist, use_container_width=True)
-            
-            st.write("### 🔋 Battery Health Trend Tracking")
-            fig_soc_hist = px.scatter(hist_df, x="report_date", y="min_soc", color="min_soc",
-                                      color_continuous_scale=["red", "orange", "green"],
-                                      range_color=[15, 45],
-                                      labels={"min_soc": "Minimum Daily SOC (%)", "report_date": "Observation Date"},
-                                      title="Historical Low Voltage/Discharge Index Progression")
-            st.plotly_chart(fig_soc_hist, use_container_width=True)
-            
-            st.write("### Raw Historical Database Records")
-            st.dataframe(hist_df.set_index("report_date"), use_container_width=True)
-            
-        else:
-            st.info("The database structure is active but empty. Upload metrics in 'Upload New CSV Logs' mode and hit save.")
-    except Exception as e:
-        st.info("The historical tables are not yet initialized. Upload your first month of metrics to activate the cloud tables automatically.")
+            if len(available_grids) > 0:
+                selected_grid = st.selectbox("Select Mini-Grid Portfolio:", available_grids)
+                
+                # Filter for the selected grid
+                hist_df = hist_db[hist_db['grid_name'] == selected_grid].copy()
+                hist_df['report_date'] = pd.to_datetime(hist_df['report_date'])
+                hist_df = hist_df.sort_values(by='report_date')
+                
+                h_col1, h_col2, h_col3 = st.columns(3)
+                h_col1.metric("Total Logged History", f"{len(hist_df)} days")
+                h_col2.metric("Cumulative Generation Archive", f"{hist_df['solar_yield_kwh'].sum():,.1f} kWh")
+                h_col3.metric("Cumulative Energy Served", f"{hist_df['ac_energy_output_kwh'].sum():,.1f} kWh")
+                
+                st.write("### 📈 Long-term Energy Metrics Analysis")
+                fig_hist = px.line(hist_df, x="report_date", y=["solar_yield_kwh", "ac_energy_output_kwh"], 
+                                   labels={"value": "Energy Metrics (kWh)", "report_date": "Observation Date"},
+                                   title=f"Archived Asset Yield Analysis for {selected_grid}")
+                fig_hist.update_layout(hovermode="x unified", legend_title_text="")
+                st.plotly_chart(fig_hist, use_container_width=True)
+                
+                st.write("### 🔋 Battery Health Trend Tracking")
+                fig_soc_hist = px.scatter(hist_df, x="report_date", y="min_soc", color="min_soc",
+                                          color_continuous_scale=["red", "orange", "green"],
+                                          range_color=[15, 45],
+                                          labels={"min_soc": "Minimum Daily SOC (%)", "report_date": "Observation Date"},
+                                          title="Historical Low Voltage/Discharge Index Progression")
+                st.plotly_chart(fig_soc_hist, use_container_width=True)
+                
+                st.write("### Raw Historical Database Records")
+                st.dataframe(hist_df.set_index("report_date"), use_container_width=True)
+            else:
+                st.info("The database is active but empty. Upload metrics in 'Upload New CSV Logs' mode and hit save.")
+        except Exception as e:
+            st.error(f"Error reading local database: {e}")
+    else:
+        st.info("The local historical database is not yet initialized. Upload your first month of metrics to generate the Excel file automatically.")
